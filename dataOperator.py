@@ -35,14 +35,16 @@ def show3D(filePath):
     display(ipyvolume.volume.quickvolshow(img))
 
 def makeDir(dir, force = False):
-    assert type(dir) == str, 'The type of dir argument should be a String.'
+    logger = logging.getLogger(__name__)
+    assert type(dir) == str,'The type of dir argument should be a String.'
+
     if not os.path.exists(dir):
         os.mkdir(dir)
     elif force:
         shutil.rmtree(dir)
         os.mkdir(dir)
     elif os.path.exists(dir) and not force:
-        print dir + 'already exists'
+        logger.debug(dir + 'already exists')
         
 def findModalDir(upDir, modal):
     for modalDirItem in os.path.listdir(upDir):
@@ -51,16 +53,102 @@ def findModalDir(upDir, modal):
             return modalDirItem
     else:
         print 'No such modal'
+
+
+def normalizeData(modalFileNameWithPath, 
+                  normModalFileNameWithPath, 
+                  clipScope = (0.5, 99.5)):
+
+    image3D = sitk.ReadImage(modalFileNameWithPath)
+    image3DArray = sitk.GetArrayFromImage(image3D)
+
+    bottom, top = np.percentile(image3DArray, clipScope)
+
+    clipedImage3DArray = np.clip(image3DArray, bottom, top)
+
+    standardDeviation = np.std(clipedImage3DArray)
+
+    if standardDeviation != 0:
+        clipedImage3DArray = (clipedImage3DArray - np.mean(clipedImage3DArray)) / standardDeviation
+
+    clipedImage3D = sitk.GetImageFromArray(clipedImage3DArray)
+
+    sitk.WriteImage(clipedImage3D, normModalFileNameWithPath)
+
+
+
+def normalizeDataSet(dataPath = '../data/BRATS2015_Training/', 
+                     normalizedDataDir = '../data/normalizedDataSet/', 
+                     clipScope = (0.5, 99.5)):
+
+    '''
+    Normalizes all models data of all patients excluding ground truth.
+    First, clips top and bottom one percent of pixel intensities
+    Then, subtracts mean and div by std dev for each volumn.
+    '''
+    logger = logging.getLogger(__name__)
+
+    startTime = time.time()
+
+    normDataDir = normalizedDataDir
+    makeDir(normDataDir)
+
+    logger.debug('normDataDir: {}'.format(normDataDir))
+
+    for gradeDirItem in os.listdir(dataPath):
+
+        logger.debug('gradeDirItem: {}'.format(gradeDirItem))
+
+        gradeDir = os.path.join(dataPath, gradeDirItem)
+        normGradeDir = os.path.join(normDataDir, gradeDirItem)
+        makeDir(normGradeDir)
+
+        for patientDirItem in os.listdir(gradeDir):
+
+            patientDir = os.path.join(gradeDir, patientDirItem)
+            normPatientDir = os.path.join(normGradeDir, patientDirItem)
+            makeDir(normPatientDir)
+
+            for modalDirItem in os.listdir(patientDir):
+
+                modalDir = os.path.join(patientDir, modalDirItem)
+                normModalDir = os.path.join(normPatientDir, modalDirItem)
+                makeDir(normModalDir)
+
+                modalFileList = [fileItem for fileItem in os.listdir(modalDir) if fileItem.endswith('.mha')]
+                logger.debug('modalFileList: {}'.format(modalFileList))
+
+                assert len(modalFileList) == 1
+
+                modalFileName = modalFileList[0]
+
+                modalFileNameWithPath = os.path.join(modalDir, modalFileName)
+                normModalFileNameWithPath = os.path.join(normModalDir, modalFileName)
+
+                logger.debug('modalFileNameWithPath: {}'.format(modalFileNameWithPath))
+                logger.debug('normModalFileNameWithPath: {}'.format(normModalFileNameWithPath))
+
+                normalizeData(modalFileNameWithPath, normModalFileNameWithPath, clipScope)
+
+    logger.info('The time for normalizing all data is {}'.format(time.time() - startTime))
+
+
+
+
+
+
+
+
             
 def makeCubes(subStructure = 'edema', 
-                  modal = 'T2', 
-                  dataPath = './BRATS2015_Training/', 
-                  cubeDirectory = './cubeData',
-                  grade = 'HGG', 
-#                   numberOfPatients = 10, 
-#                   numberOfPointsPerPatient = 100, 
-                  cubeSize = 5, 
-                  valDataRatio = 0.1):
+              modal = 'T2', 
+              dataPath = '../data/BRATS2015_Training/', 
+              cubeDirectory = './cubeData',
+              grade = 'HGG', 
+#               numberOfPatients = 10, 
+#               numberOfPointsPerPatient = 100, 
+              cubeSize = 5, 
+              valDataRatio = 0.1):
     '''
     According to the size of receptive field of network, generate the data points, i.e., the cubeSize should equal the size of receptive field
     Every generated data point have two part, the 3D data array with shape (cubeSize, cubeSize, cubeSize) and the its label
@@ -82,6 +170,8 @@ def makeCubes(subStructure = 'edema',
     assert cubeSize % 2 == 1 and cubeSize > 0, '''{} is not a odd number or {} not more than 0'''.format(cubeSize, cubeSize)
     
     logger = logging.getLogger(__name__)
+
+    startTime = time.time()
 
     makeDir(cubeDirectory)
     gradeCubeDir = os.path.join(cubeDirectory, grade)
@@ -199,6 +289,8 @@ def makeCubes(subStructure = 'edema',
             stackedValImageArray = stackedImageArray[numberOfTrainData:]
             np.save(stackedValImageNameWithPath, stackedValImageArray)
             logger.debug(stackedValImageNameWithPath +  'saved')
+
+    logger.info('The time for making cubes is {}'.format(time.time() - startTime))
 
 class cubesGetor():
     
