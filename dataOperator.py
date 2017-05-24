@@ -58,6 +58,11 @@ def findModalDir(upDir, modal):
 def normalizeData(modalFileNameWithPath, 
                   normModalFileNameWithPath, 
                   clipScope = (0.5, 99.5)):
+    if 'OT' in os.path.basename(modalFileNameWithPath):
+        shutil.copyfile(modalFileNameWithPath, normModalFileNameWithPath)
+        assert os.path.isfile(normModalFileNameWithPath)
+
+        return
 
     image3D = sitk.ReadImage(modalFileNameWithPath)
     image3DArray = sitk.GetArrayFromImage(image3D)
@@ -133,17 +138,11 @@ def normalizeDataSet(dataPath = '../data/BRATS2015_Training/',
     logger.info('The time for normalizing all data is {}'.format(time.time() - startTime))
 
 
-
-
-
-
-
-
             
 def makeCubes(subStructure = 'edema', 
               modal = 'T2', 
               dataPath = '../data/BRATS2015_Training/', 
-              cubeDirectory = './cubeData',
+              cubeDirectory = '../data/cubeData',
               grade = 'HGG', 
 #               numberOfPatients = 10, 
 #               numberOfPointsPerPatient = 100, 
@@ -292,43 +291,240 @@ def makeCubes(subStructure = 'edema',
 
     logger.info('The time for making cubes is {}'.format(time.time() - startTime))
 
+
+def makeCubesOnTheFly(subStructure = 'edema', 
+              modal = 'T2', 
+              dataPath = '../data/BRATS2015_Training/', 
+              cubeDirectory = '../data/cubeData',
+              grade = 'HGG', 
+#               numberOfPatients = 10, 
+#               numberOfPointsPerPatient = 100, 
+              cubeSize = 5, 
+              valDataRatio = 0.1):
+    '''
+    According to the size of receptive field of network, generate the data points, i.e., the cubeSize should equal the size of receptive field
+    Every generated data point have two part, the 3D data array with shape (cubeSize, cubeSize, cubeSize) and the its label
+    The data label use a int number to represent, i.e., 1 for necrosis, 2 for edma, 3 for non-enhancing, 4 for enhancing, 0 for everything else
+    -----------------
+    subStructure: tumer substructure, can choose edema, solid, necrotic or non-enhancing. Note, not every patient contains all kind of substruce
+    modal: a modal list. Choose different modal for different substructure,for example, T2 and FLAIR are usually used to segment edema
+    dataPath: path to the BRATS data
+    grade: choose different grade patient, such as HGG or LGG
+    numberOfPatients: the number of patients that are used to generate data point
+    numberOfPoints: the number of generated data points
+    cubeSize: the shape of cube like 3D array, must be an odd number
+    -----------------
+    '''
+    assert subStructure in ['edema', 'necrosis', 'non-enhancing', 'enhancing'], '''{} not in the list ['edema', 'necrosis', 'non-enhancing', 'enhancing']'''.format(subStrcture)
+#     assert False not in [mod in ['T1', 'T1c', 'T2', 'FLAIR'] for mod in modal], '''{} is not the subset of ['T1', 'T1c', 'T2', 'FLAIR']'''.format(modal)
+    assert modal in ['T1', 'T1c', 'T2', 'FLAIR'], '''{} not in the list ['T1', 'T1c', 'T2', 'FLAIR']'''.format(modal)
+    assert grade in ['HGG', 'LGG'], '''{} not in the list ['HGG', 'LGG']'''.format(grade)
+    assert cubeSize % 2 == 1 and cubeSize > 0, '''{} is not a odd number or {} not more than 0'''.format(cubeSize, cubeSize)
+    
+    logger = logging.getLogger(__name__)
+
+    startTime = time.time()
+
+    makeDir(cubeDirectory)
+    gradeCubeDir = os.path.join(cubeDirectory, grade)
+    makeDir(gradeCubeDir)
+    # The cubeData directory tree is simular with the BRSTS2015_Training directory tree
+    gradeDir = os.path.join(dataPath, grade)
+    patientDirList = os.listdir(gradeDir)
+    for patientDirItem in tqdm_notebook(patientDirList, desc = 'For every patient'):
+        patientCubeDir = os.path.join(gradeCubeDir, patientDirItem)
+        makeDir(patientCubeDir)
+        
+        patientDir = os.path.join(gradeDir, patientDirItem)
+        modalDirList = os.listdir(patientDir)
+        
+        targetModalDirItem = ''
+        groundTruthDirItem = ''
+        for modalDirItem in modalDirList:
+            modalDirItemSegment = modalDirItem.split('.')
+            if 'MR_' + modal in modalDirItemSegment:
+                targetModalDirItem = modalDirItem
+            
+            if 'OT' in modalDirItemSegment:
+                groundTruthDirItem = modalDirItem
+        
+        assert targetModalDirItem != '', 'Can not find the directory of this modal:' + modal
+        assert groundTruthDirItem != '', 'Can not find the directory of the ground truth:'
+        
+        
+        targetModalCubeDir = os.path.join(patientCubeDir, targetModalDirItem)
+        makeDir(targetModalCubeDir)
+        
+        # targetModalCubeForSpecificSizeDir looks like './cubeData/HGG/brats_2013_pat0001_1/VSD.Brain_3more.XX.O.OT.54517/7'
+        targetModalCubeForSpecificSizeDir = os.path.join(targetModalCubeDir, str(cubeSize))
+        makeDir(targetModalCubeForSpecificSizeDir)
+        
+        targetModalDir = os.path.join(patientDir, targetModalDirItem)
+        goundTruthDir = os.path.join(patientDir, groundTruthDirItem)
+        
+        modalMhaFile = glob.glob(targetModalDir + '/*.mha')[0]
+        groundTruthMhaFile = glob.glob(goundTruthDir + '/*.mha')[0]
+        
+        groundTruth = sitk.ReadImage(groundTruthMhaFile)
+        
+
+        groundTruthArray = sitk.GetArrayFromImage(groundTruth)
+
+        groundTAShape = groundTruthArray.shape
+        cubeHalfLen = (cubeSize - 1) / 2
+        startIndex = (cubeHalfLen,) * 3
+
+        effectiveGroundTruthArray = groundTruthArray[startIndex[0]:groundTAShape[0] - cubeHalfLen,
+                                                     startIndex[1]:groundTAShape[1] - cubeHalfLen,
+                                                     startIndex[2]:groundTAShape[2] - cubeHalfLen]
+        
+        groundTruthArrayCount = ndarrayCounter(groundTruthArray)
+        groundTruthArrayCountDict = dict(groundTruthArrayCount)
+
+        effectiveGroundTruthArrayCount = ndarrayCounter(effectiveGroundTruthArray)
+        effectiveGroundTruthArrayCountDict = dict(effectiveGroundTruthArrayCount)
+
+        logger.debug('groundTruthArrayCountDict: {}'.format(groundTruthArrayCountDict))
+
+        for label in groundTruthArrayCountDict.keys():
+            if label !=0 and groundTruthArrayCountDict[label] != effectiveGroundTruthArrayCountDict[label]:
+                logger.warning('The number of label {} in ground truth array and \
+                    effective ground truth array \
+                    equal {}, {} respectively'.format(label,
+                                                      groundTruthArrayCountDict[label],
+                                                      effectiveGroundTruthArrayCountDict[label]))
+        
+        firstMax = groundTruthArrayCount.max()
+        secondMax = groundTruthArrayCount[1:].max()
+        
+        negtivePointsAcceptRatio = ((secondMax + 200) / float(firstMax)) * 1.3
+            
+        stackVector2MatrixDic = dict(groundTruthArrayCount)
+        cubeElementNumber = cubeSize * cubeSize * cubeSize
+        for pair in groundTruthArrayCount:
+            stackVector2MatrixDic[pair[0]] = []
+        
+#         print stackVector2MatrixDic
+        
+        for i in xrange(startIndex[0], groundTAShape[0] - cubeHalfLen):
+            for j in xrange(startIndex[1], groundTAShape[1] - cubeHalfLen):
+                for k in xrange(startIndex[2], groundTAShape[2] - cubeHalfLen):
+                    # ijkLabel is the element in the groundTruth Array with index [i,j,k]
+                    # ijkLabel represent the label of the voxel in the image3DArray with index [i,j,k]
+                    ijkLabel = groundTruthArray[i, j, k]
+                    if ijkLabel == 0 and random.random() > negtivePointsAcceptRatio:
+                        continue
+                    
+                    ImageStartIndex = (i - cubeHalfLen, j - cubeHalfLen, k - cubeHalfLen)
+                    ISIi, ISIj, ISIk = ImageStartIndex
+
+                    ImageEndIndex = (ISIi + cubeSize, ISIj + cubeSize, ISIk + cubeSize)
+                    IEIi, IEIj, IEIk = ImageEndIndex
+
+                    vectorImageHead = [ijkLabel, i, j, k, ISIi, IEIi, ISIj, IEIj, ISIk, IEIk]
+
+                    stackVector2MatrixDic[ijkLabel].append(vectorImageHead)
+
+        stackedImageBaseName = targetModalCubeForSpecificSizeDir.replace('/', '_')[2:]
+        logger.debug('stackedImageBaseName: {}'.format(stackedImageBaseName))
+        # stackedImageName looks like '0_cubeData_HGG_brats_2013_pat0001_1_VSD.Brain_3more.XX.O.OT.54517_7'
+        # Shuffle the negtive points
+        random.shuffle(stackVector2MatrixDic[0])
+        
+        for key in stackVector2MatrixDic.keys():
+            stackVector2MatrixLen = len(stackVector2MatrixDic[key])
+            if key != 0:
+                assert stackVector2MatrixLen == effectiveGroundTruthArrayCountDict[key]
+                assert stackVector2MatrixLen <= len(stackVector2MatrixDic[0])
+
+            stackedImageArray = np.array(stackVector2MatrixDic[key])
+            logger.debug('Shuffling the stackedImageArray, then it can be split in two part')
+            np.random.shuffle(stackedImageArray)
+            logger.debug('Shuffed the stackedImageArray, then it can be split in two part')
+            numberOfValData = int(stackVector2MatrixLen * valDataRatio)
+            numberOfTrainData = stackVector2MatrixLen - numberOfValData
+
+            # The stackedTrainImageName looks like 0_54959_train_{cubeDirectory}_HGG_...
+            stackedTrainImageName = str(key) + '_' + str(numberOfTrainData) + '_train' + stackedImageBaseName
+            stackedTrainImageNameWithPath = os.path.join(targetModalCubeForSpecificSizeDir, stackedTrainImageName)
+            stackedTrainImageArray = stackedImageArray[: numberOfTrainData]
+            np.save(stackedTrainImageNameWithPath, stackedTrainImageArray)
+            logger.debug(stackedTrainImageName +  'saved')
+
+            stackedValImageName = str(key) + '_' + str(numberOfValData) + '_val' + stackedImageBaseName
+            stackedValImageNameWithPath = os.path.join(targetModalCubeForSpecificSizeDir, stackedValImageName)
+            stackedValImageArray = stackedImageArray[numberOfTrainData:]
+            np.save(stackedValImageNameWithPath, stackedValImageArray)
+            logger.debug(stackedValImageNameWithPath +  'saved')
+
+    logger.info('The time for making cubes is {}'.format(time.time() - startTime))
+
+
+
 class cubesGetor():
     
     def __init__(self, 
                  subStructure = 'edema', 
                  modal = 'T2', 
                  batchSize = 20,
-                 cubeDirectory = './cubeData',
+                 cubeDirectory = '../data/cubeData',
+                 sourceDataDirectory = '../data/normalizedDataSet',
                  grade = 'HGG', 
                  cubeSize = 5, 
                  negPosRatio = 1., 
-                 trainOrVal = 'train'):
+                 trainOrVal = 'train',
+                 onTheFly = False):
         self.subStructure = subStructure
         self.modal = modal
         self.batchSize = batchSize
         self.cubeDirectory = cubeDirectory
+        self.sourceDataDirectory = sourceDataDirectory
         self.grade = grade
         self.cubeSize = cubeSize
         self.negPosRatio = negPosRatio
         self.trainOrVal = trainOrVal
+        self.onTheFly = onTheFly
+
         self.logger = logging.getLogger(__name__)
         
         # gradeCubeDir looks like {self.cubeDirectory}/HGG
         gradeCubeDir = os.path.join(self.cubeDirectory, self.grade)
+
         patientCubeDirItemList = os.listdir(gradeCubeDir)
         # patientCubeDirItem looks like brats_2013_pat0001_1
+
         patientCubeDirList = [os.path.join(gradeCubeDir, patientCubeDirItem) \
                           for patientCubeDirItem in patientCubeDirItemList]
+
         self.patientCubeDirList = patientCubeDirList
 
-        self.logger.info('Found {} {} patients'.format(len(self.patientCubeDirList), self.grade))
+
+        self.logger.debug('Found {} {} patients'.format(len(self.patientCubeDirList), self.grade))
         
         dataInformationList = self.goToDataDirectly()
+        self.logger.debug('dataInformationList: {}'.format(dataInformationList))
+        # sourceDataInformationList = self.goToDataDirectly(toSource = True)
+
+
         self.dataFileList = [fileInfoItem[0] for fileInfoItem in dataInformationList]
         self.dataFileLengthList = [fileInfoItem[1] for fileInfoItem in dataInformationList]
         self.dataFileLengthAddedList = [sum(self.dataFileLengthList[: i + 1]) \
                                         for i in xrange(len(self.dataFileLengthList))]
-        
+
+        self.sourceDataFileList = []
+
+        for dataFileItem in self.dataFileList:
+            dataFileItemSegment = dataFileItem.split('/')
+            neededDataFileItemSeg = dataFileItemSegment[3:6]
+
+            sourceDataDir = os.path.join(self.sourceDataDirectory, *neededDataFileItemSeg)
+            sourceDataFileItem = glob.glob(sourceDataDir + '/*.mha')[0]
+
+            self.sourceDataFileList.append(sourceDataFileItem)
+
+        self.logger.debug('sourceDataFileList: {}'.format(self.sourceDataFileList))
+
+
     def goToDataDirectly(self):
         subStructureDict = {'other': 0, 
                             'necrosis': 1,
@@ -336,6 +532,7 @@ class cubesGetor():
                             'non-enhancing': 3,
                             'enhancing': 4}
         dataInfomationList = []
+
         for patientCubeDir in self.patientCubeDirList:
             
             modalCubeDirList = os.listdir(patientCubeDir)
@@ -358,6 +555,9 @@ class cubesGetor():
 
             for cubeDataFileDirItem in cubeDataFileDirList:
                 cubeDataFileDirItemSegment = cubeDataFileDirItem.split('_')
+                self.logger.debug('trainOrVal: {}, file infomation: {}'.format(self.trainOrVal, 
+                                                                         cubeDataFileDirItemSegment[2]))
+
                 if self.trainOrVal == cubeDataFileDirItemSegment[2]:
 
                     if str(subStructureDict[self.subStructure]) == cubeDataFileDirItemSegment[0]:
@@ -371,8 +571,8 @@ class cubesGetor():
             targetFile = os.path.join(cubeDataFileDir, targetFileItem)
             negtiveFile = os.path.join(cubeDataFileDir, negtiveFileItem)
 
-            self.logger.debug('Find the {} positive file : '.format(self.trainOrVal) + targetFile)
-            self.logger.debug('Find the {} negtive file : '.format(self.trainOrVal) + negtiveFile)
+            self.logger.debug('Find the {} positive file: {}'.format(self.trainOrVal, targetFile))
+            self.logger.debug('Find the {} negtive file: {}'.format(self.trainOrVal, negtiveFile))
             
             # The number of negtive points usually large that the positive's
             numberOfDataItems = targetFileItem.split('_')[1]
@@ -385,6 +585,7 @@ class cubesGetor():
             dataInfomationList.append((negtiveFile, numberOfNegtiveDataItems))
             
         return dataInfomationList
+
         
     def fetchCubes(self, batchSize = 0, shuffle = True, oneHot = False):
         dataIndexList = range(1, self.dataFileLengthAddedList[-1] + 1)
@@ -434,7 +635,8 @@ class cubesGetor():
                 reshapedBatchLabel = np.array(batchDataLabelList, dtype = 'int32')
 
             yield reshapedBatchData, reshapedBatchLabel
-            
+
+
             
     def fromIdxGetDataItem(self, dataIndex):
         assert dataIndex >= 1 and dataIndex <= self.dataFileLengthAddedList[-1]
@@ -451,11 +653,19 @@ class cubesGetor():
         dataItem = stackedImageArray[relativeIndex]
         dataLabel = dataItem[0]
         dataOriginalIndex = dataItem[1: 4]
-        dataVector = dataItem[4:]
-        
-        dataCube = vector2Cube(dataVector, self.cubeSize)
+
+        if not self.onTheFly:
+            dataVector = dataItem[4:]
+            dataCube = vector2Cube(dataVector, self.cubeSize)
+
+        if self.onTheFly:
+            ISIi, IEIi, ISIj, IEIj, ISIk, IEIk = dataItem[4:]
+            image3D = sitk.ReadImage(self.sourceDataFileList[fileIndex])
+            image3DArray = sitk.GetArrayFromImage(image3D)
+            dataCube = image3DArray[ISIi: IEIi, ISIj: IEIj, ISIk: IEIk]
         
         return (dataLabel, dataCube)
+
     
 
     def generateSynthesisData(self, batchSize = 0, dataSize = 100000, group0 = (0, 1), group1 = (1, 1)):

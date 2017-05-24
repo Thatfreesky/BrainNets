@@ -1,5 +1,7 @@
 import ipyvolume.pylab as p3
 import ipyvolume
+import ipywidgets as widgets
+import SimpleITk as sitk
 from bokeh.io import push_notebook, show, output_notebook
 from bokeh.plotting import figure
 output_notebook()
