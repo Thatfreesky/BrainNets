@@ -1,18 +1,22 @@
 import os
 import glob
 import time
+import types
 import bisect
 import random
 import shutil
 import theano
 import logging
 import pyprind
+# import copy_reg
 import ipyvolume
 import numpy as np
 from time import sleep
 import SimpleITK as sitk
+import multiprocessing as mp
 from collections import Counter
 from IPython.display import display
+import pathos.multiprocessing as pmp
 from tqdm import tqdm_notebook, tnrange
 
 random.seed(1321)
@@ -84,7 +88,8 @@ def normalizeData(modalFileNameWithPath,
 
 def normalizeDataSet(dataPath = '../data/BRATS2015_Training/', 
                      normalizedDataDir = '../data/normalizedDataSet/', 
-                     clipScope = (0.5, 99.5)):
+                     clipScope = (0.5, 99.5), 
+                     parallel = False):
 
     '''
     Normalizes all models data of all patients excluding ground truth.
@@ -99,6 +104,12 @@ def normalizeDataSet(dataPath = '../data/BRATS2015_Training/',
     makeDir(normDataDir)
 
     logger.debug('normDataDir: {}'.format(normDataDir))
+
+    if parallel:
+        logger.info('Using multiprocessing')
+        cpuCount = mp.cpu_count()
+        pool = mp.Pool(processes = cpuCount)
+
 
     for gradeDirItem in os.listdir(dataPath):
 
@@ -133,7 +144,18 @@ def normalizeDataSet(dataPath = '../data/BRATS2015_Training/',
                 logger.debug('modalFileNameWithPath: {}'.format(modalFileNameWithPath))
                 logger.debug('normModalFileNameWithPath: {}'.format(normModalFileNameWithPath))
 
-                normalizeData(modalFileNameWithPath, normModalFileNameWithPath, clipScope)
+                if parallel:
+                    pool.apply_async(normalizeData, args = (modalFileNameWithPath, 
+                                                            normModalFileNameWithPath, 
+                                                            clipScope))
+                    
+                else:
+                    normalizeData(modalFileNameWithPath, normModalFileNameWithPath, clipScope)
+
+    if parallel:
+        pool.close()
+        pool.join()
+
 
     logger.info('The time for normalizing all data is {}'.format(time.time() - startTime))
 
@@ -292,15 +314,17 @@ def makeCubes(subStructure = 'edema',
     logger.info('The time for making cubes is {}'.format(time.time() - startTime))
 
 
-def makeCubesOnTheFly(subStructure = 'edema', 
-              modal = 'T2', 
-              dataPath = '../data/BRATS2015_Training/', 
-              cubeDirectory = '../data/cubeData',
-              grade = 'HGG', 
-#               numberOfPatients = 10, 
-#               numberOfPointsPerPatient = 100, 
-              cubeSize = 5, 
-              valDataRatio = 0.1):
+
+
+def makeCubesOnTheFly(modal = 'T2', 
+                      dataPath = '../data/BRATS2015_Training/', 
+                      cubeDirectory = '../data/cubeData',
+                      grade = 'HGG', 
+        #               numberOfPatients = 10, 
+        #               numberOfPointsPerPatient = 100, 
+                      cubeSize = 5, 
+                      valDataRatio = 0.1, 
+                      parallel = False):
     '''
     According to the size of receptive field of network, generate the data points, i.e., the cubeSize should equal the size of receptive field
     Every generated data point have two part, the 3D data array with shape (cubeSize, cubeSize, cubeSize) and the its label
@@ -315,13 +339,16 @@ def makeCubesOnTheFly(subStructure = 'edema',
     cubeSize: the shape of cube like 3D array, must be an odd number
     -----------------
     '''
-    assert subStructure in ['edema', 'necrosis', 'non-enhancing', 'enhancing'], '''{} not in the list ['edema', 'necrosis', 'non-enhancing', 'enhancing']'''.format(subStrcture)
-#     assert False not in [mod in ['T1', 'T1c', 'T2', 'FLAIR'] for mod in modal], '''{} is not the subset of ['T1', 'T1c', 'T2', 'FLAIR']'''.format(modal)
+
     assert modal in ['T1', 'T1c', 'T2', 'FLAIR'], '''{} not in the list ['T1', 'T1c', 'T2', 'FLAIR']'''.format(modal)
     assert grade in ['HGG', 'LGG'], '''{} not in the list ['HGG', 'LGG']'''.format(grade)
     assert cubeSize % 2 == 1 and cubeSize > 0, '''{} is not a odd number or {} not more than 0'''.format(cubeSize, cubeSize)
     
     logger = logging.getLogger(__name__)
+
+    if parallel:
+        logger.info('Using multiprocessing')
+        pool = mp.Pool()
 
     startTime = time.time()
 
@@ -365,99 +392,121 @@ def makeCubesOnTheFly(subStructure = 'edema',
         modalMhaFile = glob.glob(targetModalDir + '/*.mha')[0]
         groundTruthMhaFile = glob.glob(goundTruthDir + '/*.mha')[0]
         
-        groundTruth = sitk.ReadImage(groundTruthMhaFile)
-        
+        # ---------------------------------------------------------------------------
 
-        groundTruthArray = sitk.GetArrayFromImage(groundTruth)
+        if parallel:
 
-        groundTAShape = groundTruthArray.shape
-        cubeHalfLen = (cubeSize - 1) / 2
-        startIndex = (cubeHalfLen,) * 3
+            pool.apply_async(makeCubeOnTheFly, args = (groundTruthMhaFile, 
+                                                       targetModalCubeForSpecificSizeDir, 
+                                                       cubeSize, 
+                                                       valDataRatio))
 
-        effectiveGroundTruthArray = groundTruthArray[startIndex[0]:groundTAShape[0] - cubeHalfLen,
-                                                     startIndex[1]:groundTAShape[1] - cubeHalfLen,
-                                                     startIndex[2]:groundTAShape[2] - cubeHalfLen]
-        
-        groundTruthArrayCount = ndarrayCounter(groundTruthArray)
-        groundTruthArrayCountDict = dict(groundTruthArrayCount)
+        else:
+            makeCubeOnTheFly(groundTruthMhaFile, targetModalCubeForSpecificSizeDir, cubeSize, valDataRatio)
 
-        effectiveGroundTruthArrayCount = ndarrayCounter(effectiveGroundTruthArray)
-        effectiveGroundTruthArrayCountDict = dict(effectiveGroundTruthArrayCount)
+    if parallel:
+        pool.close()
+        pool.join()
 
-        logger.debug('groundTruthArrayCountDict: {}'.format(groundTruthArrayCountDict))
-
-        for label in groundTruthArrayCountDict.keys():
-            if label !=0 and groundTruthArrayCountDict[label] != effectiveGroundTruthArrayCountDict[label]:
-                logger.warning('The number of label {} in ground truth array and \
-                    effective ground truth array \
-                    equal {}, {} respectively'.format(label,
-                                                      groundTruthArrayCountDict[label],
-                                                      effectiveGroundTruthArrayCountDict[label]))
-        
-        firstMax = groundTruthArrayCount.max()
-        secondMax = groundTruthArrayCount[1:].max()
-        
-        negtivePointsAcceptRatio = ((secondMax + 200) / float(firstMax)) * 1.3
-            
-        stackVector2MatrixDic = dict(groundTruthArrayCount)
-        cubeElementNumber = cubeSize * cubeSize * cubeSize
-        for pair in groundTruthArrayCount:
-            stackVector2MatrixDic[pair[0]] = []
-        
-#         print stackVector2MatrixDic
-        
-        for i in xrange(startIndex[0], groundTAShape[0] - cubeHalfLen):
-            for j in xrange(startIndex[1], groundTAShape[1] - cubeHalfLen):
-                for k in xrange(startIndex[2], groundTAShape[2] - cubeHalfLen):
-                    # ijkLabel is the element in the groundTruth Array with index [i,j,k]
-                    # ijkLabel represent the label of the voxel in the image3DArray with index [i,j,k]
-                    ijkLabel = groundTruthArray[i, j, k]
-                    if ijkLabel == 0 and random.random() > negtivePointsAcceptRatio:
-                        continue
-                    
-                    ImageStartIndex = (i - cubeHalfLen, j - cubeHalfLen, k - cubeHalfLen)
-                    ISIi, ISIj, ISIk = ImageStartIndex
-
-                    ImageEndIndex = (ISIi + cubeSize, ISIj + cubeSize, ISIk + cubeSize)
-                    IEIi, IEIj, IEIk = ImageEndIndex
-
-                    vectorImageHead = [ijkLabel, i, j, k, ISIi, IEIi, ISIj, IEIj, ISIk, IEIk]
-
-                    stackVector2MatrixDic[ijkLabel].append(vectorImageHead)
-
-        stackedImageBaseName = targetModalCubeForSpecificSizeDir.replace('/', '_')[2:]
-        logger.debug('stackedImageBaseName: {}'.format(stackedImageBaseName))
-        # stackedImageName looks like '0_cubeData_HGG_brats_2013_pat0001_1_VSD.Brain_3more.XX.O.OT.54517_7'
-        # Shuffle the negtive points
-        random.shuffle(stackVector2MatrixDic[0])
-        
-        for key in stackVector2MatrixDic.keys():
-            stackVector2MatrixLen = len(stackVector2MatrixDic[key])
-            if key != 0:
-                assert stackVector2MatrixLen == effectiveGroundTruthArrayCountDict[key]
-                assert stackVector2MatrixLen <= len(stackVector2MatrixDic[0])
-
-            stackedImageArray = np.array(stackVector2MatrixDic[key])
-            logger.debug('Shuffling the stackedImageArray, then it can be split in two part')
-            np.random.shuffle(stackedImageArray)
-            logger.debug('Shuffed the stackedImageArray, then it can be split in two part')
-            numberOfValData = int(stackVector2MatrixLen * valDataRatio)
-            numberOfTrainData = stackVector2MatrixLen - numberOfValData
-
-            # The stackedTrainImageName looks like 0_54959_train_{cubeDirectory}_HGG_...
-            stackedTrainImageName = str(key) + '_' + str(numberOfTrainData) + '_train' + stackedImageBaseName
-            stackedTrainImageNameWithPath = os.path.join(targetModalCubeForSpecificSizeDir, stackedTrainImageName)
-            stackedTrainImageArray = stackedImageArray[: numberOfTrainData]
-            np.save(stackedTrainImageNameWithPath, stackedTrainImageArray)
-            logger.debug(stackedTrainImageName +  'saved')
-
-            stackedValImageName = str(key) + '_' + str(numberOfValData) + '_val' + stackedImageBaseName
-            stackedValImageNameWithPath = os.path.join(targetModalCubeForSpecificSizeDir, stackedValImageName)
-            stackedValImageArray = stackedImageArray[numberOfTrainData:]
-            np.save(stackedValImageNameWithPath, stackedValImageArray)
-            logger.debug(stackedValImageNameWithPath +  'saved')
 
     logger.info('The time for making cubes is {}'.format(time.time() - startTime))
+
+
+
+def makeCubeOnTheFly(groundTruthMhaFile, targetModalCubeForSpecificSizeDir, cubeSize, valDataRatio):
+
+    logger = logging.getLogger(__name__)
+
+    groundTruth = sitk.ReadImage(groundTruthMhaFile)
+    groundTruthArray = sitk.GetArrayFromImage(groundTruth)
+
+    groundTAShape = groundTruthArray.shape
+    cubeHalfLen = (cubeSize - 1) / 2
+    startIndex = (cubeHalfLen,) * 3
+
+    effectiveGroundTruthArray = groundTruthArray[startIndex[0]:groundTAShape[0] - cubeHalfLen,
+                                                 startIndex[1]:groundTAShape[1] - cubeHalfLen,
+                                                 startIndex[2]:groundTAShape[2] - cubeHalfLen]
+    
+    groundTruthArrayCount = ndarrayCounter(groundTruthArray)
+    groundTruthArrayCountDict = dict(groundTruthArrayCount)
+
+    effectiveGroundTruthArrayCount = ndarrayCounter(effectiveGroundTruthArray)
+    effectiveGroundTruthArrayCountDict = dict(effectiveGroundTruthArrayCount)
+
+    logger.debug('groundTruthArrayCountDict: {}'.format(groundTruthArrayCountDict))
+
+    for label in groundTruthArrayCountDict.keys():
+        if label !=0 and groundTruthArrayCountDict[label] != effectiveGroundTruthArrayCountDict[label]:
+            logger.warning('The number of label {} in ground truth array and \
+                effective ground truth array \
+                equal {}, {} respectively'.format(label,
+                                                  len(groundTruthArrayCountDict[label]),
+                                                  len(effectiveGroundTruthArrayCountDict[label])))
+    
+    firstMax = effectiveGroundTruthArrayCount.max()
+    secondMax = effectiveGroundTruthArrayCount[1:].max()
+    
+    negtivePointsAcceptRatio = ((secondMax + 200) / float(firstMax)) * 3
+        
+    stackVector2MatrixDic = dict(effectiveGroundTruthArrayCount)
+    cubeElementNumber = cubeSize * cubeSize * cubeSize
+    for pair in effectiveGroundTruthArrayCount:
+        stackVector2MatrixDic[pair[0]] = []
+    
+#         print stackVector2MatrixDic
+    
+    for i in xrange(startIndex[0], groundTAShape[0] - cubeHalfLen):
+        for j in xrange(startIndex[1], groundTAShape[1] - cubeHalfLen):
+            for k in xrange(startIndex[2], groundTAShape[2] - cubeHalfLen):
+                # ijkLabel is the element in the groundTruth Array with index [i,j,k]
+                # ijkLabel represent the label of the voxel in the image3DArray with index [i,j,k]
+                ijkLabel = groundTruthArray[i, j, k]
+                if ijkLabel == 0 and random.random() > negtivePointsAcceptRatio:
+                    continue
+                
+                ImageStartIndex = (i - cubeHalfLen, j - cubeHalfLen, k - cubeHalfLen)
+                ISIi, ISIj, ISIk = ImageStartIndex
+
+                ImageEndIndex = (ISIi + cubeSize, ISIj + cubeSize, ISIk + cubeSize)
+                IEIi, IEIj, IEIk = ImageEndIndex
+
+                vectorImageHead = [ijkLabel, i, j, k, ISIi, IEIi, ISIj, IEIj, ISIk, IEIk]
+
+                stackVector2MatrixDic[ijkLabel].append(vectorImageHead)
+
+    stackedImageBaseName = targetModalCubeForSpecificSizeDir.replace('/', '_')[2:]
+    logger.debug('stackedImageBaseName: {}'.format(stackedImageBaseName))
+    # stackedImageName looks like '0_cubeData_HGG_brats_2013_pat0001_1_VSD.Brain_3more.XX.O.OT.54517_7'
+    # Shuffle the negtive points
+    random.shuffle(stackVector2MatrixDic[0])
+    
+    for key in stackVector2MatrixDic.keys():
+        stackVector2MatrixLen = len(stackVector2MatrixDic[key])
+        if key != 0:
+            assert stackVector2MatrixLen == effectiveGroundTruthArrayCountDict[key]
+            assert stackVector2MatrixLen <= len(stackVector2MatrixDic[0]), '{}, {}'.format(stackVector2MatrixLen, 
+                                                                                           len(stackVector2MatrixDic[0]))
+
+        stackedImageArray = np.array(stackVector2MatrixDic[key])
+        logger.debug('Shuffling the stackedImageArray, then it can be split in two part')
+        np.random.shuffle(stackedImageArray)
+        logger.debug('Shuffed the stackedImageArray, then it can be split in two part')
+        numberOfValData = int(stackVector2MatrixLen * valDataRatio)
+        numberOfTrainData = stackVector2MatrixLen - numberOfValData
+
+        # The stackedTrainImageName looks like 0_54959_train_{cubeDirectory}_HGG_...
+        stackedTrainImageName = str(key) + '_' + str(numberOfTrainData) + '_train' + stackedImageBaseName
+        stackedTrainImageNameWithPath = os.path.join(targetModalCubeForSpecificSizeDir, stackedTrainImageName)
+        stackedTrainImageArray = stackedImageArray[: numberOfTrainData]
+        np.save(stackedTrainImageNameWithPath, stackedTrainImageArray)
+        logger.debug(stackedTrainImageName +  'saved')
+
+        stackedValImageName = str(key) + '_' + str(numberOfValData) + '_val' + stackedImageBaseName
+        stackedValImageNameWithPath = os.path.join(targetModalCubeForSpecificSizeDir, stackedValImageName)
+        stackedValImageArray = stackedImageArray[numberOfTrainData:]
+        np.save(stackedValImageNameWithPath, stackedValImageArray)
+        logger.debug(stackedValImageNameWithPath +  'saved')
 
 
 
@@ -473,7 +522,7 @@ class cubesGetor():
                  cubeSize = 5, 
                  negPosRatio = 1., 
                  trainOrVal = 'train',
-                 onTheFly = False):
+                 onTheFly = True):
         self.subStructure = subStructure
         self.modal = modal
         self.batchSize = batchSize
@@ -587,7 +636,7 @@ class cubesGetor():
         return dataInfomationList
 
         
-    def fetchCubes(self, batchSize = 0, shuffle = True, oneHot = False):
+    def fetchCubes(self, batchSize = 0, shuffle = True, oneHot = False, parallel = False):
         dataIndexList = range(1, self.dataFileLengthAddedList[-1] + 1)
 
         if batchSize == 0:
@@ -605,7 +654,28 @@ class cubesGetor():
             self.logger.debug('Fetching the {} th of {} excepts in {} data'.format(startIndex / batchSize + 1, len(dataIndexList) /batchSize, self.trainOrVal))
             excerpt = dataIndexList[startIndex: startIndex + batchSize]
             
-            batchDataItemList = [self.fromIdxGetDataItem(dataIndex) for dataIndex in excerpt]
+            if parallel:
+
+                results = []
+                pool = pmp.Pool()
+
+                for dataIndex in excerpt:
+
+                    result = pool.apply_async(self.fromIdxGetDataItem, args = (dataIndex,))
+                    results.append(result)
+
+                pool.close()
+                pool.join()
+
+
+                batchDataItemList = [res.get() for res in results]
+
+                assert len(batchDataItemList) == batchSize, 'batchDataItemList: {}, batchSize: {}'.format(batchDataItemList,
+                                                                                                          batchSize)
+
+            else:
+                batchDataItemList = [self.fromIdxGetDataItem(dataIndex) for dataIndex in excerpt]
+
             batchDataLabelList = [batchDataItemList[i][0] for i in range(batchSize)]
             batchDataCubeList = [batchDataItemList[i][1] for i in range(batchSize)]
             
@@ -636,8 +706,7 @@ class cubesGetor():
 
             yield reshapedBatchData, reshapedBatchLabel
 
-
-            
+  
     def fromIdxGetDataItem(self, dataIndex):
         assert dataIndex >= 1 and dataIndex <= self.dataFileLengthAddedList[-1]
         fileIndex = bisect.bisect_left(self.dataFileLengthAddedList, dataIndex)
@@ -667,7 +736,6 @@ class cubesGetor():
         return (dataLabel, dataCube)
 
     
-
     def generateSynthesisData(self, batchSize = 0, dataSize = 100000, group0 = (0, 1), group1 = (1, 1)):
 
         if batchSize == 0:
@@ -697,7 +765,12 @@ class cubesGetor():
             yield reshapedBatchData, reshapedBatchLabel
 
 
+# def _pickle_method(m):
+#     if m.im_self is None:
+#         return getattr, (m.im_class, m.im_func.func_name)
+#     else:
+#         return getattr, (m.im_self, m.im_func.func_name)
 
-
+# copy_reg.pickle(types.MethodType, _pickle_method)
 
 

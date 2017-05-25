@@ -13,7 +13,7 @@ from lasagne.objectives import categorical_crossentropy, binary_crossentropy
 
 class Network():
     def __init__(self,
-                 input_shape=(None, 1, 5, 5, 5)):
+                 input_shape=(None, 1, 33, 33, 33)):
         self.cubeSize = input_shape[-1]
 
         # Theano variables
@@ -48,15 +48,10 @@ class Network():
 
         trainPrediction = get_output(self.output_layer)
         trainLoss = categorical_crossentropy(trainPrediction, self.target_var).mean()
-        # zeroLoss = categorical_crossentropy(self.target_var, self.target_var)
-        trainPairLoss = categorical_crossentropy(trainPrediction, self.target_var)
-
-        trainACC = T.mean(T.eq(T.argmax(trainPrediction, axis = 1), self.target_var), dtype = theano.config.floatX)
-
-        trainLocation = T.argmax(trainPrediction, axis = 1)
+  
         params = get_all_params(self.output_layer, trainable = True)
         update = momentum(trainLoss, params, learning_rate = 0.001, momentum=0.9)
-        trainFunc = theano.function([self.input_var, self.target_var], [self.target_var, trainPrediction, trainACC, trainLocation, trainLoss, trainPairLoss], updates = update)
+        trainFunc = theano.function([self.input_var, self.target_var], [trainLoss], updates = update)
         
         return trainFunc
 
@@ -67,9 +62,6 @@ class Network():
         
         valAndTestACC = T.mean(T.eq(T.argmax(valAndTestPrediction, axis = 1), self.target_var), dtype = theano.config.floatX)
 
-        location = T.argmax(valAndTestPrediction, axis = 1)
-        # self.logger.debug('The T.argmax(valAndTestPrediction, axis=1) equals {} and the target_var equals {}'.format(T.argmax(valAndTestPrediction, axis = 1), self.target_var))
-
-        valAndTestFunc = theano.function([self.input_var, self.target_var], [valAndTestLoss, valAndTestACC, location, self.target_var])
+        valAndTestFunc = theano.function([self.input_var, self.target_var], [valAndTestLoss, valAndTestACC])
 
         return valAndTestFunc
