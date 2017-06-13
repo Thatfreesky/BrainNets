@@ -142,6 +142,8 @@ def trainNetwork(network, configFile):
     numOfSubEpochs = configInfo['numOfSubEpochs']
     memoryThreshold = configInfo['memoryThreshold']
 
+    usePoolToSample = configInfo['usePoolToSample']
+
     assert memoryThreshold > memoryNeededPerPatData
 
     maxPatNumPerSubEpoch = math.floor(memoryThreshold / memoryNeededPerPatData)
@@ -215,6 +217,9 @@ def trainNetwork(network, configFile):
             logger.info(logMessage('-', message))
  
             # Just for short statement.
+            message = 'Sampling'
+            logger.info(logMessage('.', message))
+            sampleTime = time.time()
             sampleAndLabelList = getSamplesForSubEpoch(numOfTrainSamplesPerSubEpoch,
                                                        patDirPerSubEpochDict[subEpIdx],
                                                        useROI,
@@ -222,8 +227,9 @@ def trainNetwork(network, configFile):
                                                        normType,
                                                        trainSampleSize ,
                                                        receptiveField,
-                                                       weightMapType)
-
+                                                       weightMapType,
+                                                       usePoolToSample)
+            print time.time() - sampleTime
             shuffledSamplesList, shuffledLabelsList = sampleAndLabelList
 
             batchIdxList = [batchIdx for batchIdx 

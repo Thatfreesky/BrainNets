@@ -3,6 +3,7 @@ import random
 import math
 import theano
 import numpy as np
+import multiprocessing as mp
 
 import loadData
 reload(loadData)
@@ -18,7 +19,8 @@ def getSamplesForSubEpoch(numOfSamplesPerSubEpochTrain,
                           normType = 0,
                           trainSampleSize = [25, 25, 25],
                           receptiveField = 17,
-                          weightMapType = 0):
+                          weightMapType = 0,
+                          parallel = False):
 
     logger = logging.getLogger(__name__)
 
@@ -47,12 +49,17 @@ def getSamplesForSubEpoch(numOfSamplesPerSubEpochTrain,
     numOfSamplesPerPatient = numOfSamplesPerSubEpochTrain / numOfPatients
     remainder = numOfSamplesPerSubEpochTrain % numOfPatients
 
+    assert numOfSamplesPerPatient * numOfPatients + remainder == \
+           numOfSamplesPerSubEpochTrain
+
     # If we use 3 patient and need 17 samples, 
     # the numOfSamplesPerPatientList will look like [6, 6, 5]
     numOfSamplesPerPatientList = [numOfSamplesPerPatient] * numOfPatients
-    [numOfSamplesPerPatientList[idx] + 1 for idx in range(remainder)]
+    for idx in range(remainder):
+        numOfSamplesPerPatientList[idx] += 1
 
-    assert sum(numOfSamplesPerPatientList) == numOfSamplesPerSubEpochTrain
+    assert sum(numOfSamplesPerPatientList) == numOfSamplesPerSubEpochTrain, \
+           '{}:{}'.format(sum(numOfSamplesPerPatientList), numOfSamplesPerSubEpochTrain)
 
     # If foreBackRatio = 0.4, 
     # The numOfForeBackSamplesList will look like [[2, 4], [2, 4], [2, 3]]
@@ -72,57 +79,46 @@ def getSamplesForSubEpoch(numOfSamplesPerSubEpochTrain,
 
     receptiveFieldRadius = receptiveField / 2
 
+    if parallel:
+        pool = mp.Pool()
+        results = []
+
     for idx, patientDir in enumerate(patientsDirList):
 
-        # Also store the ROI in the patientLabelArray if useROI == True
-        # patientImageArray dtype = theano.config.floatX.
-        # patientLabelArray dtype = int16
-        patientImageArray, patientLabelArray = loadData.loadSinglePatientData(patientDir, 
-                                                                              useROI, 
-                                                                              modals, 
-                                                                              normType)
-
-        assert patientImageArray.shape == (len(modals), 155, 240, 240)
-        assert patientLabelArray.shape == (1 + int(useROI), 155, 240, 240), \
-               '{} == {}'.format(patientLabelArray.shape, (1 + int(useROI), 155, 240, 240))
-
-        assert isinstance(patientImageArray, np.ndarray)
-        assert isinstance(patientLabelArray, np.ndarray)
-
         numOfForeBackSamples = numOfForeBackSamplesList[idx]
-        samplesOfAPatient, labelsOfAPatient = sampleAPatient(patientImageArray, 
-                                                             patientLabelArray, 
-                                                             numOfForeBackSamples,
-                                                             useROI,
-                                                             trainSampleSize,
-                                                             receptiveField,
-                                                             weightMapType)
-        assert isinstance(samplesOfAPatient, list)
-        assert isinstance(labelsOfAPatient, list)
 
-        # For short the assert statements.
-        zSize = trainSampleSize[0]
-        xSize = trainSampleSize[1]
-        ySize = trainSampleSize[2]
+        if parallel:
+            result = pool.apply_async(getSamplesFromAPatient, args = (patientDir, 
+                                                                      useROI, 
+                                                                      modals, 
+                                                                      normType, 
+                                                                      trainSampleSize, 
+                                                                      receptiveField, 
+                                                                      weightMapType, 
+                                                                      numOfForeBackSamples))
+            results.append(result)
 
-        assert len(samplesOfAPatient) == sum(numOfForeBackSamples)
-        assert all([sample.shape == (len(modals), zSize, xSize, ySize) 
-                    for sample in samplesOfAPatient]), '{}'.format([s.shape 
-                                                                    for s in samplesOfAPatient])
+        else:
+            samplesOfAPatient, labelsOfAPatient = getSamplesFromAPatient(patientDir, 
+                                                                         useROI, 
+                                                                         modals, 
+                                                                         normType, 
+                                                                         trainSampleSize, 
+                                                                         receptiveField, 
+                                                                         weightMapType, 
+                                                                         numOfForeBackSamples)
+            samplesList += samplesOfAPatient
+            labelsList += labelsOfAPatient
 
-        # For short the assert statements.
-        rF = receptiveField
-        assert len(labelsOfAPatient) == sum(numOfForeBackSamples)
-        assert all([label.shape == (zSize - rF + 1, xSize - rF + 1, ySize - rF + 1)
-                    for label in labelsOfAPatient])
+    if parallel:
+        pool.close()
+        pool.join()
 
-        # The two lists expend for each loop.
-        samplesList += samplesOfAPatient
-        labelsList += labelsOfAPatient
-
-        logger.info('Get {} / {} samples from {} patients'.format(len(samplesList), 
-                                                                    numOfSamplesPerSubEpochTrain, 
-                                                                    idx + 1))
+        for result in results:
+            samplesOfAPatient, labelsOfAPatient = result.get()
+            samplesList += samplesOfAPatient
+            labelsList += labelsOfAPatient
+    # ---------------------------------------------------------------------------------------
 
     # Release the memory.
     del samplesOfAPatient[:], samplesOfAPatient
@@ -155,6 +151,62 @@ def getSamplesForSubEpoch(numOfSamplesPerSubEpochTrain,
     return shuffledSamplesList, shuffledLabelsList
 
 
+
+def getSamplesFromAPatient(patientDir, 
+                           useROI, 
+                           modals, 
+                           normType, 
+                           trainSampleSize, 
+                           receptiveField, 
+                           weightMapType, 
+                           numOfForeBackSamples):
+
+    # Also store the ROI in the patientLabelArray if useROI == True
+    # patientImageArray dtype = theano.config.floatX.
+    # patientLabelArray dtype = int16
+    patientImageArray, patientLabelArray = loadData.loadSinglePatientData(patientDir, 
+                                                                          useROI, 
+                                                                          modals, 
+                                                                          normType)
+
+    assert patientImageArray.shape == (len(modals), 155, 240, 240)
+    assert patientLabelArray.shape == (1 + int(useROI), 155, 240, 240), \
+           '{} == {}'.format(patientLabelArray.shape, (1 + int(useROI), 155, 240, 240))
+
+    assert isinstance(patientImageArray, np.ndarray)
+    assert isinstance(patientLabelArray, np.ndarray)
+
+    samplesOfAPatient, labelsOfAPatient = sampleAPatient(patientImageArray, 
+                                                         patientLabelArray, 
+                                                         numOfForeBackSamples,
+                                                         useROI,
+                                                         trainSampleSize,
+                                                         receptiveField,
+                                                         weightMapType)
+    assert isinstance(samplesOfAPatient, list)
+    assert isinstance(labelsOfAPatient, list)
+
+    # For short the assert statements.
+    zSize = trainSampleSize[0]
+    xSize = trainSampleSize[1]
+    ySize = trainSampleSize[2]
+
+    assert len(samplesOfAPatient) == sum(numOfForeBackSamples)
+    assert all([sample.shape == (len(modals), zSize, xSize, ySize) 
+                for sample in samplesOfAPatient]), '{}'.format([s.shape 
+                                                                for s in samplesOfAPatient])
+
+    # For short the assert statements.
+    rF = receptiveField
+    assert len(labelsOfAPatient) == sum(numOfForeBackSamples)
+    assert all([label.shape == (zSize - rF + 1, xSize - rF + 1, ySize - rF + 1)
+                for label in labelsOfAPatient])
+
+    # The two lists expend for each loop.
+    return samplesOfAPatient, labelsOfAPatient
+
+
+
 def sampleAPatient(patientImageArray, 
                    patientLabelArray, 
                    numOfForeBackSamples,
@@ -163,7 +215,7 @@ def sampleAPatient(patientImageArray,
                    receptiveField,
                    weightMapType):
 
-    logger = logging.getLogger(__name__)
+    # logger = logging.getLogger(__name__)
 
     gTArray = patientLabelArray[0]
 
@@ -173,11 +225,11 @@ def sampleAPatient(patientImageArray,
 
     numOfForeSamples, numOfBackSamples = numOfForeBackSamples
     # Foreground samples coordinate range.
-    logger.debug('Get samples coordinates by foreMask.')
+    # logger.debug('Get samples coordinates by foreMask.')
     foreSamplesCdList = getSamplesCoordinateList(foreMask, 
                                                  numOfForeSamples, 
                                                  trainSampleSize)
-    logger.debug('Get samples coordinates by backMask.')
+    # logger.debug('Get samples coordinates by backMask.')
     backSamplesCdList = getSamplesCoordinateList(backMask, 
                                                  numOfBackSamples, 
                                                  trainSampleSize)
@@ -197,7 +249,7 @@ def sampleAPatient(patientImageArray,
 
 def getSamplesOfAPatient(patientImageArray, samplesCdList, trainSampleSize):
 
-    logger = logging.getLogger(__name__)
+    # logger = logging.getLogger(__name__)
 
     samplesOfAPatient = []
 
@@ -229,7 +281,7 @@ def getSamplesOfAPatient(patientImageArray, samplesCdList, trainSampleSize):
 
 def getLabelsOfAPatient(gTArray, samplesCdList, receptiveField, trainSampleSize):
 
-    logger = logging.getLogger(__name__)
+    # logger = logging.getLogger(__name__)
 
     labelsOfAPatient = []
     labelSize = [axleSize - receptiveField + 1 
@@ -256,7 +308,7 @@ def getLabelsOfAPatient(gTArray, samplesCdList, receptiveField, trainSampleSize)
 
 def getSamplesCoordinateList(mask, numOfSamples, trainSampleSize):
 
-    logger = logging.getLogger(__name__)
+    # logger = logging.getLogger(__name__)
 
     maskShape = mask.shape
     # If trainSampleSize = [25, 25, 25],
@@ -264,7 +316,7 @@ def getSamplesCoordinateList(mask, numOfSamples, trainSampleSize):
     centerLocOfSampleSize = [int(math.ceil(axle / 2))
                              for axle in trainSampleSize]
 
-    logger.debug('centerLocOfSampleSize: {}'.format(centerLocOfSampleSize))
+    # logger.debug('centerLocOfSampleSize: {}'.format(centerLocOfSampleSize))
     # In fact, I am not sure the axles is this order (z, x, y).
     # But no matter at here.
     halfLZAxle = centerLocOfSampleSize[0] - 1
