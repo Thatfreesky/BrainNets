@@ -65,9 +65,10 @@ def trainNetwork(network, configFile):
     configInfo = {}
     execfile(configFile, configInfo)
 
+    trainSampleSize = configInfo['trainSampleSize']
     networkType = network.networkType
     receptiveField = network.receptiveField
-    networkSummary = network.summary
+    networkSummary = network.summary(trainSampleSize)
 
     message = 'Network Summary'
     logger.info(logMessage('*', message))
@@ -362,9 +363,11 @@ def testNetwork(network, configFile):
     configInfo = {}
     execfile(configFile, configInfo)
 
+    # For summary.
+    testSampleSize = configInfo['testSampleSize']
     networkType = network.networkType
     receptiveField = network.receptiveField
-    networkSummary = network.summary
+    networkSummary = network.summary(testSampleSize)
 
     message = 'Network Summary'
     logger.info(logMessage('*', message))
@@ -431,7 +434,7 @@ def testNetwork(network, configFile):
         segmentResult = np.zeros(imageShape, dtype = 'int32')
         segmentResultMask = np.zeros(imageShape, dtype = 'int16')
 
-        
+
 
 
 

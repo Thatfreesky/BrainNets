@@ -97,15 +97,17 @@ class BaseNet():
 
 
 
-    def buildBaseNet(self):
+    def buildBaseNet(self, inputShape = (None, 4, 25, 25, 25), forSummary = False):
 
-        message = 'Building the Architecture of BaseNet'
-        self.logger.info(logMessage('+', message))
+        if not forSummary:
+            message = 'Building the Architecture of BaseNet'
+            self.logger.info(logMessage('+', message))
 
         baseNet = InputLayer(self.inputShape, self.inputVar)
 
-        message = 'Building the convolution layers'
-        self.logger.info(logMessage('-', message))
+        if not forSummary:
+            message = 'Building the convolution layers'
+            self.logger.info(logMessage('-', message))
 
         kernelShapeListLen = len(self.kernelNumList)
 
@@ -118,9 +120,10 @@ class BaseNet():
 
         summary += '{:<3} {:<15} {:<50} {:<29} {:<29}\n'.format(1, 
                                                                 'Input', 
-                                                                self.inputShape, 
+                                                                inputShape, 
                                                                 '',
-                                                                get_output_shape(baseNet))
+                                                                get_output_shape(baseNet, 
+                                                                input_shapes = inputShape))
 
         for i in xrange(kernelShapeListLen - 1):
 
@@ -139,15 +142,15 @@ class BaseNet():
 
             summary += '{:<3} {:<15} {:<50} {:<29} {:<29}\n'.format(i + 2, 
                                                                     'Conv3D', 
-                                                                    get_output_shape(baseNet), 
+                                                                    get_output_shape(baseNet, input_shapes = inputShape), 
                                                                     WShape,
-                                                                    get_output_shape(conv3D))
+                                                                    get_output_shape(conv3D, input_shapes = inputShape))
 
             batchNormLayer = BatchNormLayer(conv3D)
             preluLayer = prelu(batchNormLayer)
             
-            concatLayerInputShape = '{:<25}{:<25}'.format(get_output_shape(conv3D),
-                                                           get_output_shape(baseNet))
+            concatLayerInputShape = '{:<25}{:<25}'.format(get_output_shape(conv3D, input_shapes = inputShape),
+                                                           get_output_shape(baseNet, input_shapes = inputShape))
 
             baseNet = ConcatLayer([preluLayer, baseNet], 1, cropping = ['center', 
                                                                         'None', 
@@ -158,13 +161,13 @@ class BaseNet():
             summary += '    {:<15} {:<50} {:<29} {:<29}\n'.format('Concat', 
                                                                   concatLayerInputShape, 
                                                                   '',
-                                                                  get_output_shape(baseNet))
+                                                                  get_output_shape(baseNet, input_shapes = inputShape))
+        if not forSummary:
+            message = 'Finish Built the convolution layers'
+            self.logger.info(logMessage('-', message))
 
-        message = 'Finish Built the convolution layers'
-        self.logger.info(logMessage('-', message))
-
-        message = 'Building the last classfication layers'
-        self.logger.info(logMessage('-', message))
+            message = 'Building the last classfication layers'
+            self.logger.info(logMessage('-', message))
 
         assert self.kernelShapeList[-1] == [1, 1, 1]
 
@@ -179,7 +182,7 @@ class BaseNet():
                               name = 'Classfication Layer')
 
 
-        receptiveFieldList = [self.inputShape[idx] - get_output_shape(conv3D)[idx] + 1
+        receptiveFieldList = [inputShape[idx] - get_output_shape(conv3D, input_shapes = inputShape)[idx] + 1
                               for idx in xrange(-3, 0)]
         assert receptiveFieldList != []
         receptiveFieldSet = set(receptiveFieldList)
@@ -191,9 +194,9 @@ class BaseNet():
 
         summary += '{:<3} {:<15} {:<50} {:<29} {:<29}\n'.format(kernelShapeListLen + 1, 
                                                                 'Conv3D', 
-                                                                get_output_shape(baseNet), 
+                                                                get_output_shape(baseNet, input_shapes = inputShape), 
                                                                 WShape,
-                                                                get_output_shape(conv3D))
+                                                                get_output_shape(conv3D, input_shapes = inputShape))
 
         # The output shape should be (batchSize, numOfClasses, zSize, xSize, ySize).
         # We will reshape it to (batchSize * zSize * xSize * ySize, numOfClasses),
@@ -201,43 +204,36 @@ class BaseNet():
 
         baseNet = DimshuffleLayer(conv3D, (0, 2, 3, 4, 1))
         summary += '    {:<15} {:<50} {:<29} {:<29}\n'.format('Dimshuffle', 
-                                                              get_output_shape(conv3D), 
+                                                              get_output_shape(conv3D, input_shapes = inputShape), 
                                                               '',
-                                                              get_output_shape(baseNet))
+                                                              get_output_shape(baseNet, input_shapes = inputShape))
 
         batchSize, zSize, xSize, ySize, _ = get_output(baseNet).shape
-        reshapeLayerInputShape = get_output_shape(baseNet)
+        reshapeLayerInputShape = get_output_shape(baseNet, input_shapes = inputShape)
         baseNet = ReshapeLayer(baseNet, (batchSize * zSize * xSize * ySize, kernelNum))
         summary += '    {:<15} {:<50} {:<29} {:<29}\n'.format('Reshape', 
                                                               reshapeLayerInputShape, 
                                                               '',
-                                                              get_output_shape(baseNet))
+                                                              get_output_shape(baseNet, input_shapes = inputShape))
 
-        nonlinearityLayerInputShape = get_output_shape(baseNet)
+        nonlinearityLayerInputShape = get_output_shape(baseNet, input_shapes = inputShape)
         baseNet = NonlinearityLayer(baseNet, softmax)
         summary += '    {:<15} {:<50} {:<29} {:<29}\n'.format('Nonlinearity', 
                                                               nonlinearityLayerInputShape, 
                                                               '',
-                                                              get_output_shape(baseNet))
+                                                              get_output_shape(baseNet, input_shapes = inputShape))
+        
+        if not forSummary:
+            message = 'Finish Built the last classfication layers'
+            self.logger.info(logMessage('-', message))
 
-        message = 'Finish Built the last classfication layers'
-        self.logger.info(logMessage('-', message))
+            message = 'The Receptivr Field of BaseNet equal {}'.format(self.receptiveField)
+            self.logger.info(logMessage('*', message))
 
-        message = 'The Receptivr Field of BaseNet equal {}'.format(self.receptiveField)
-        self.logger.info(logMessage('*', message))
+            message = 'Finish Building the Architecture of BaseNet'
+            self.logger.info(logMessage('+', message))
 
-        message = 'Finish Building the Architecture of BaseNet'
-        self.logger.info(logMessage('+', message))
-
-        # message = 'The Summary of Architecture of BaseNet Can Be Show Below'
-        # self.logger.info(logMessage('=', message))
-
-        # summary += '.' * 130 + '\n'
-        # self.logger.info(summary)
-
-        # self.logger.info(logMessage('=', '='))
-
-        self.summary = summary
+        self._summary = summary
 
         if self.preTrainedWeights != '':
             self.restoreWeights()
@@ -382,5 +378,9 @@ class BaseNet():
         set_all_param_values(self.outputLayer, savedWeights)
 
 
+    def summary(self, inputShape):
 
+        self.buildBaseNet(inputShape, forSummary = True)
+
+        return self._summary
 
