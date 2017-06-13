@@ -12,6 +12,7 @@ from models.sectorNet import SectorNet
 from models.baseNet import BaseNet
 
 from utils.sampling import getSamplesForSubEpoch
+from utils.loadData import loadSinglePatientData
 
 
 
@@ -175,7 +176,7 @@ def trainNetwork(network, configFile):
         message += 'subepoch we can only choose {} patients data'.format(maxPatNumPerSubEpoch)
         logger.ingo(logMessage(' ', message))
 
-    message = 'Begin training loops'
+    message = 'Begin Training Loops'
     logger.info(logMessage('=', message))
 
     numOfTrainSamplesPerSubEpoch = configInfo['numOfTrainSamplesPerSubEpoch']
@@ -195,7 +196,7 @@ def trainNetwork(network, configFile):
 
     # For logger train results
     tableRowList = []
-    tableRowList.append(['EPOCH', 'SUBEPOCH', 'Train Loss', 'Train ACC'])
+    tableRowList.append(['EPOCH', 'SUBEPOCH', 'Train Loss', 'Train ACC', 'Sampling Time', 'Training Time'])
 
 
     for epIdx in xrange(numOfEpochs):
@@ -209,6 +210,9 @@ def trainNetwork(network, configFile):
         trainEpACC = 0
         trainEpBatchNum = 0
 
+        totalSamplingTime = 0
+        totalTrainingTime = 0
+
         for subEpIdx in xrange(numOfSubEpochs):
 
             subEpStartTime = time.time()
@@ -216,10 +220,13 @@ def trainNetwork(network, configFile):
             message = 'SUBEPOCH: {}/{}'.format(subEpIdx + 1, numOfSubEpochs)
             logger.info(logMessage('-', message))
  
+            # Training
+            # ####################################################################
             # Just for short statement.
-            message = 'Sampling'
+            # -----------------------------------------------------------------
+            message = 'Training Sampling'
             logger.info(logMessage('.', message))
-            sampleTime = time.time()
+            sampleStartTime = time.time()
             sampleAndLabelList = getSamplesForSubEpoch(numOfTrainSamplesPerSubEpoch,
                                                        patDirPerSubEpochDict[subEpIdx],
                                                        useROI,
@@ -229,9 +236,12 @@ def trainNetwork(network, configFile):
                                                        receptiveField,
                                                        weightMapType,
                                                        usePoolToSample)
-            print time.time() - sampleTime
-            shuffledSamplesList, shuffledLabelsList = sampleAndLabelList
 
+            sampleStartTime = time.time() - sampleStartTime
+
+            shuffledSamplesList, shuffledLabelsList = sampleAndLabelList
+            # -----------------------------------------------------------------
+            
             batchIdxList = [batchIdx for batchIdx 
                             in xrange(0, numOfTrainSamplesPerSubEpoch, batchSize)]
 
@@ -244,6 +254,10 @@ def trainNetwork(network, configFile):
             trainSubEpACC = 0
             trainSubEpBatchNum = 0
 
+            # Batch loops
+            # -----------------------------------------------------------------
+            message = 'Training'
+            logger.info(logMessage(':', message))
             for batchIdx in batchIdxList[:-1]:
 
                 samplesBatch = shuffledSamplesList[batchIdx:batchIdx + 1]
@@ -257,6 +271,8 @@ def trainNetwork(network, configFile):
                 trainSubEpLoss += trainBatchLoss
                 trainSubEpACC += trainBatchAcc
                 trainSubEpBatchNum += 1
+            # -----------------------------------------------------------------
+            subEpStartTime = time.time() - subEpStartTime - sampleStartTime
 
             trainEpLoss += trainSubEpLoss
             trainEpACC += trainSubEpACC
@@ -268,30 +284,59 @@ def trainNetwork(network, configFile):
             trainResults[epIdx][subEpIdx]['trainLoss'].append(trainSubEpLoss)
             trainResults[epIdx][subEpIdx]['trainACC'].append(trainSubEpACC)
 
+            totalSamplingTime += sampleStartTime
+            totalTrainingTime += subEpStartTime
+
+            subEpStartTime = '{:.3f}'.format(subEpStartTime)
+            sampleStartTime = '{:.3f}'.format(sampleStartTime)
             # For logger
+            # -----------------------------------------------------------------
             if subEpIdx == 0:
-                tableRowList.append([epIdx + 1, subEpIdx + 1, trainSubEpLoss, trainSubEpACC])
+                tableRowList.append([epIdx + 1, 
+                                     subEpIdx + 1, 
+                                     trainSubEpLoss, 
+                                     trainSubEpACC, 
+                                     sampleStartTime, 
+                                     subEpStartTime])
             else:
-                tableRowList.append(['', subEpIdx + 1, trainSubEpLoss, trainSubEpACC])
+                tableRowList.append(['', 
+                                     subEpIdx + 1, 
+                                     trainSubEpLoss, 
+                                     trainSubEpACC, 
+                                     sampleStartTime, 
+                                     subEpStartTime])
 
             message = 'SUBEPOCH: {}/{} '.format(subEpIdx + 1, numOfSubEpochs)
-            message += 'took {:.3f} s.'.format(time.time() - subEpStartTime)
+            message += 'took {} s.'.format(subEpStartTime)
             message += 'SubEpoch Train Loss: {:.6f}, '.format(trainSubEpLoss)
             message += 'Train ACC: {:.6f}'.format(trainSubEpACC)
             logger.info(logMessage('-', message))
+            # ------------------------------------------------------------------
 
         trainEpLoss /= trainEpBatchNum
         trainEpACC /= trainEpBatchNum
 
-        tableRowList.append(['-', '-', '-', '-'])
-        tableRowList.append(['', '', trainEpLoss, trainEpACC])
-        tableRowList.append(['-', '-', '-', '-'])
+        # For logger
+        # -------------------------------------------------------------------
+        totalSamplingTime = '{:.3}'.format(totalSamplingTime)
+        totalTrainingTime = '{:.3}'.format(totalTrainingTime)
+
+        tableRowList.append(['-', '-', '-', '-', '-', '-'])
+        tableRowList.append(['', '', trainEpLoss, trainEpACC, totalSamplingTime, totalTrainingTime])
+        tableRowList.append(['-', '-', '-', '-', '-', '-'])
 
         message = 'EPOCH: {}/{} '.format(epIdx + 1, numOfEpochs)
         message += 'took {:.3f} s.'.format(time.time() - epStartTime)
         message += 'Epoch Train Loss: {:.6f}, '.format(trainEpLoss)
         message += 'Epoch Train ACC: {:.6f}'.format(trainEpACC)
         logger.info(logMessage('+', message))
+        # --------------------------------------------------------------------
+        # ####################################################################
+
+        message = 'Validation'
+        logger.info(logMessage(':', message))
+
+
 
     message = 'The Training Results'
     logger.info(logMessage('=', message))
@@ -299,9 +344,114 @@ def trainNetwork(network, configFile):
     logger.info(logMessage('=', '='))
 
 
-    message = 'End to Train Network'
+    message = 'End Training Loops'
     logger.info(logMessage('#', message))
 
 
     return trainResults
+
+
+
+def testNetwork(network, configFile):
+
+    logger = logging.getLogger(__name__)
+
+    message = 'Testing {}'.format(network.networkType)
+    logger.info(logMessage('#', message))
+
+    configInfo = {}
+    execfile(configFile, configInfo)
+
+    networkType = network.networkType
+    receptiveField = network.receptiveField
+    networkSummary = network.summary
+
+    message = 'Network Summary'
+    logger.info(logMessage('*', message))
+    logger.info(networkSummary)
+
+    tableRowList = []
+    tableRowList.append(['Network Type', networkType])
+    tableRowList.append(['Receptive Field', receptiveField])
+
+    logger.info(logTable(tableRowList))
+    logger.info(logMessage('*', '*'))
+
+    testImageFolder = configInfo['testImageFolder']
+    useROITest = configInfo['useROITest']
+    modals = configInfo['modals']
+    normType = configInfo['normType']
+    testSampleSize = configInfo['testSampleSize']
+
+    numOfPatients = len(os.listdir(testImageFolder))
+
+
+    message = 'Test Data Summary'
+    logger.info(logMessage('*', message))
+
+    tableRowList = []
+    tableRowList.append(['Test Image Folder', testImageFolder])
+    tableRowList.append(['Number of Patients', numOfPatients])
+    tableRowList.append(['Use ROI To Test Network', useROITest])
+    tableRowList.append(['Modals', modals])
+    tableRowList.append(['Normalization Type in Test Process', normType])
+    tableRowList.append(['Test Samples size', testSampleSize])
+
+    logger.info(logTable(tableRowList))    
+    logger.info(logMessage('*', '*'))
+
+    message = 'First, read the patients data files name'
+    logger.info(logMessage('*', message))
+
+
+    message = 'We get {} patients files. '.format(len(os.listdir(testImageFolder)))
+    logger.info(logMessage(' ', message))
+
+    outputFolder = configInfo['outputFolder']
+
+    for patient in os.listdir(testImageFolder):
+
+        patientDir = os.path.join(testImageFolder, patient)
+
+        segmentResultNameWithPath = os.path.join(outputFolder, patient)
+
+        # For short statement.
+        sampleWholeImageResult = sampleWholeImage(patientDir, 
+                                                  useROITest, 
+                                                  modals, 
+                                                  normType, 
+                                                  testSampleSize, 
+                                                  receptiveField)
+
+        samplesOfWholeImage = sampleWholeImageResult[0]
+        labelsOfWholeImage = sampleWholeImageResult[1]
+        wholeLabelCoordList = sampleWholeImageResult[2]
+        imageShape = sampleWholeImageResult[3]
+
+        segmentResult = np.zeros(imageShape, dtype = 'int32')
+        segmentResultMask = np.zeros(imageShape, dtype = 'int16')
+
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

@@ -58,9 +58,9 @@ class BaseNet():
 
         self.inputShape = (None, 
                            self.inputChannels,
-                           self.trainSampleSize[0],
-                           self.trainSampleSize[1],
-                           self.trainSampleSize[2])
+                           None,
+                           None,
+                           None)
 
         self.inputVar = T.tensor5('inputVar', dtype = theano.config.floatX)
         self.targetVar = T.tensor4('targetVar', dtype = 'int32')
@@ -86,9 +86,14 @@ class BaseNet():
 
 
         # ----------------------------------------------------------------------------------------
-        # For compile test function
+        # For compile val function
         self.valSampleSize = self.configInfo['valSampleSize']
         self.valFunction = self.compileValFunction()
+
+        # ----------------------------------------------------------------------------------------
+        # For compile test function
+        self.testSampleSize = self.configInfo['testSampleSize']
+        self.testFunction = self.compileTestFunction()
 
 
 
@@ -268,7 +273,7 @@ class BaseNet():
                                     [trainLoss, trainACC], 
                                     updates = update)
         
-        message = 'Compiled the Training Function, spending {:.2f}s'.format(time.time()- startTime)
+        message = 'Compiled the Training Function, spent {:.2f}s'.format(time.time()- startTime)
         self.logger.info(logMessage('+', message))
 
         return trainFunc
@@ -300,12 +305,57 @@ class BaseNet():
         valFunc = theano.function([self.inputVar, self.targetVar], 
                                   [valLoss, valACC])
         
-        message = 'Compiled the Validation Function, spending {:.2f}s'.format(time.time()- startTime)
+        message = 'Compiled the Validation Function, spent {:.2f}s'.format(time.time()- startTime)
         self.logger.info(logMessage('+', message))
 
         return valFunc
 
 
+
+    def compileTestFunction(self):
+
+        message = 'Compiling the Test Function'
+        self.logger.info(logMessage('+', message))
+
+        startTime = time.time()
+
+        testPrediction = get_output(self.outputLayer, 
+                                    deterministic = True,
+                                    batch_norm_use_averages=False)
+        # TODO. Chack wheather the flatten style of targetvar and output are same.
+
+        inputImageShape = T.shape(self.inputVar)
+        labelTensorShape = (inputImageShape[0], 
+                            inputImageShape[2] - self.receptiveField, 
+                            inputImageShape[2] - self.receptiveField, 
+                            inputImageShape[2] - self.receptiveField)
+
+        testPredictionLabel = T.argmax(testPrediction, axis = 1)
+        testPredictionLabelTensor = T.reshape(testPredictionLabel, newshape = labelTensorShape)
+
+        testOutput = [testPredictionLabelTensor]
+        assert None not in T.shape(testPredictionLabelTensor)
+
+        if self.targetVar != '':
+
+            print T.shape(testPredictionLabelTensor)
+            print T.shape(self.targetVar)
+            print T.shape(testPredictionLabelTensor) == T.shape(self.targetVar)
+            # assert T.shape(testPredictionLabelTensor) == T.shape(self.targetVar), \
+            #        '{}:{}'.format(T.shape(testPredictionLabelTensor), T.shape(self.targetVar))
+            self.flattenedTargetVar = T.flatten(self.targetVar)
+ 
+            testACC = T.mean(T.eq(testPredictionLabel, self.flattenedTargetVar), 
+                        dtype = theano.config.floatX)
+
+            testOutput.append(testACC)
+
+        testFunc = theano.function([self.inputVar, self.targetVar], testOutput)
+        
+        message = 'Compiled the Test Function, spent {:.2f}s'.format(time.time()- startTime)
+        self.logger.info(logMessage('+', message))
+
+        return testFunc
 
 
     def saveWeights(self, fileName):

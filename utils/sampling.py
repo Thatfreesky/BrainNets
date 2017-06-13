@@ -126,11 +126,11 @@ def getSamplesForSubEpoch(numOfSamplesPerSubEpochTrain,
 
     assert len(samplesList) == len(labelsList) == numOfSamplesPerSubEpochTrain
 
-    logger.info(logMessage('*', '*'))
+    logger.info(logMessage('~', '~'))
     logger.info('Get all {} samples'.format(len(samplesList)))
     logger.info('The shape of a sample array equals: {}'.format(samplesList[0].shape))
     logger.info('The shape of a label array equals: {}'.format(labelsList[0].shape))
-    logger.info(logMessage('*', '*'))
+    logger.info(logMessage('~', '~'))
 
     # By this way, we can keep the ralationships between the sample ant its label.
     zipSampleAndLabel = zip(samplesList, labelsList)
@@ -239,7 +239,7 @@ def sampleAPatient(patientImageArray,
     samplesOfAPatient = getSamplesOfAPatient(patientImageArray, 
                                              samplesCdList,
                                              trainSampleSize)
-    labelsOfAPatient = getLabelsOfAPatient(gTArray, 
+    labelsOfAPatient, _ = getLabelsOfAPatient(gTArray, 
                                            samplesCdList, 
                                            receptiveField, 
                                            trainSampleSize)
@@ -288,6 +288,7 @@ def getLabelsOfAPatient(gTArray, samplesCdList, receptiveField, trainSampleSize)
                  for axleSize in trainSampleSize]
     labelSize = tuple(labelSize)
 
+    labelsCdList = []
     rFRadius = receptiveField / 2
 
     for sampleCd in samplesCdList:
@@ -298,11 +299,12 @@ def getLabelsOfAPatient(gTArray, samplesCdList, receptiveField, trainSampleSize)
         yLeft = sampleCd[2][0] + rFRadius
         yRight = sampleCd[2][1] - rFRadius
 
+        labelsCdList.append([[zLeft, zRight], [xLeft, xRight], [yLeft, yLeft]])
         labelsOfAPatient.append(gTArray[zLeft:zRight, xLeft: xRight, yLeft: yRight])
         assert labelsOfAPatient[-1].shape == labelSize, \
                '{}:{}'.format(labelsOfAPatient[-1].shape, labelSize)
 
-    return labelsOfAPatient
+    return labelsOfAPatient, labelsCdList
 
 
 
@@ -458,7 +460,124 @@ def getForeAndBackMask(patientLabelArray,
 
 
 
+def sampleWholeImage(patientDir, 
+                     useROITest, 
+                     modals, 
+                     normType, 
+                     testSampleSize, 
+                     receptiveField):
+
+    patientImageArray, patientLabelArray = loadData.loadSinglePatientData(patientDir, 
+                                                                          useROITest, 
+                                                                          modals, 
+                                                                          normType)
+
+    assert patientImageArray.shape == (len(modals), 155, 240, 240)
+    assert patientLabelArray.shape == (1 + int(useROITest), 155, 240, 240), \
+           '{} == {}'.format(patientLabelArray.shape, (1 + int(useROITest), 155, 240, 240))
+
+    assert isinstance(patientImageArray, np.ndarray)
+    assert isinstance(patientLabelArray, np.ndarray)
+
+    imageShape = list(patientImageArray[0].shape)
+
+    if useROITest:
+        ROIArray = patientLabelArray[1]
+    else:
+        ROIArray = np.ones(imageShape, dtype = 'int16')
+
+    gTArray = patientImageArray[0]
+
+    labelShape = [axle - receptiveField + 1 for axle in testSampleSize]
+    labelShapeArray = np.asarray(labelShape, dtype = 'int16')
+   
+    wholeImageCoordList = getWholeImageCoord(imageShape,
+                                             ROIArray,
+                                             testSampleSize,
+                                             labelShape)
+
+    samplesOfWholeImage = getSamplesOfAPatient(patientImageArray, 
+                                               wholeImageCoordList,
+                                               testSampleSize)
+
+    labelsOfWholeImage, wholeLabelCoordList = getLabelsOfAPatient(gTArray, 
+                                                                  wholeImageCoordList, 
+                                                                  receptiveField, 
+                                                                  testSampleSize)
+                     
+    assert len(samplesOfWholeImage) == len(labelsOfWholeImage) == len(wholeLabelCoordList)
+
+    return samplesOfWholeImage, labelsOfWholeImage, wholeLabelCoordList, imageShape
+
+
+
+def getWholeImageCoord(imageShape,
+                       ROIArray,
+                       testSampleSize,
+                       labelShape):
+
+    wholeImageCoordList = []
+    zMinNext = 0
+
+    zAxleFinished = False
+
+    while not zAxleFinished:
+        zMax = min(zMinNext + testSampleSize[0], imageShape[0])
+        zMin = zMax - testSampleSize[0]
+        zMinNext = zMinNext + labelShape[0]
+
+        if zMax < imageShape[0]:
+            zAxleFinished = False
+        else:
+            zAxleFinished = True
+
+
+        xMinNext = 0
+        xAxleFinished = False
+
+        while not xAxleFinished:
+            xMax = min(xMinNext + testSampleSize[1], imageShape[1])
+            xMin = xMax - testSampleSize[1]
+            xMinNext = xMinNext + labelShape[1]
+
+            if xMax < imageShape[1]:
+                xAxleFinished = False
+            else:
+                xAxleFinished = True
+
+
+            yMinNext = 0
+            yAxleFinished = False
+
+            while not yAxleFinished:
+                yMax = min(yMinNext + testSampleSize[2], imageShape[2])
+                yMin = yMax - testSampleSize[2]
+                yMinNext = yMinNext + labelShape[2]
+
+                if yMax < imageShape[2]:
+                    yAxleFinished = False
+                else:
+                    yAxleFinished = True
+
+                if not np.any(ROIArray[zMin:zMax, xMin:xMax, yMin:yMax]):
+                    continue
+
+                assert yMax - yMin == testSampleSize[2]
+                assert yMin >= 0 and yMax <= imageShape[2]
+
+                assert xMax - xMin == testSampleSize[1]
+                assert xMin >= 0 and xMax <= imageShape[1]
+
+                assert zMax - zMin == testSampleSize[0]
+                assert zMin >= 0 and zMax <= imageShape[0]
+
+                wholeImageCoordList.append([[zMin, zMax], [yMin, yMax], [xMin, xMax]])
+
+    return wholeImageCoordList
 
 
 
 
+
+
+    
