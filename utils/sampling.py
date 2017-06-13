@@ -8,6 +8,7 @@ import loadData
 reload(loadData)
 import general
 reload(general)
+from general import logMessage, logTable
 
 
 def getSamplesForSubEpoch(numOfSamplesPerSubEpochTrain,
@@ -129,11 +130,11 @@ def getSamplesForSubEpoch(numOfSamplesPerSubEpochTrain,
 
     assert len(samplesList) == len(labelsList) == numOfSamplesPerSubEpochTrain
 
-    logger.info('***************************************************')
+    logger.info(logMessage('*', '*'))
     logger.info('Get all {} samples'.format(len(samplesList)))
     logger.info('The shape of a sample array equals: {}'.format(samplesList[0].shape))
     logger.info('The shape of a label array equals: {}'.format(labelsList[0].shape))
-    logger.info('***************************************************')
+    logger.info(logMessage('*', '*'))
 
     # By this way, we can keep the ralationships between the sample ant its label.
     zipSampleAndLabel = zip(samplesList, labelsList)

@@ -191,6 +191,11 @@ def trainNetwork(network, configFile):
     trainSubResults = lambda:{subEpIdx: differCreteria() for subEpIdx in xrange(numOfSubEpochs)}
     trainResults = {epIdx: trainSubResults() for epIdx in xrange(numOfEpochs)}
 
+    # For logger train results
+    tableRowList = []
+    tableRowList.append(['EPOCH', 'SUBEPOCH', 'Train Loss', 'Train ACC'])
+
+
     for epIdx in xrange(numOfEpochs):
 
         epStartTime = time.time()
@@ -257,6 +262,11 @@ def trainNetwork(network, configFile):
             trainResults[epIdx][subEpIdx]['trainLoss'].append(trainSubEpLoss)
             trainResults[epIdx][subEpIdx]['trainACC'].append(trainSubEpACC)
 
+            # For logger
+            if subEpIdx == 0:
+                tableRowList.append([epIdx + 1, subEpIdx + 1, trainSubEpLoss, trainSubEpACC])
+            else:
+                tableRowList.append(['', subEpIdx + 1, trainSubEpLoss, trainSubEpACC])
 
             message = 'SUBEPOCH: {}/{} '.format(subEpIdx + 1, numOfSubEpochs)
             message += 'took {:.3f} s.'.format(time.time() - subEpStartTime)
@@ -267,19 +277,20 @@ def trainNetwork(network, configFile):
         trainEpLoss /= trainEpBatchNum
         trainEpACC /= trainEpBatchNum
 
+        tableRowList.append(['-', '-', '-', '-'])
+        tableRowList.append(['', '', trainEpLoss, trainEpACC])
+        tableRowList.append(['-', '-', '-', '-'])
+
         message = 'EPOCH: {}/{} '.format(epIdx + 1, numOfEpochs)
         message += 'took {:.3f} s.'.format(time.time() - epStartTime)
         message += 'Epoch Train Loss: {:.6f}, '.format(trainEpLoss)
         message += 'Epoch Train ACC: {:.6f}'.format(trainEpACC)
         logger.info(logMessage('+', message))
 
-
-
-
-
-
-
-
+    message = 'The Training Results'
+    logger.info(logMessage('=', message))
+    logger.info(logTable(tableRowList))
+    logger.info(logMessage('=', '='))
 
 
     message = 'End to Train Network'

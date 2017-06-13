@@ -75,6 +75,8 @@ def logTable(tableRowList):
     table = ''
 
     for i, row in enumerate(tableRowList):
+        if all([col == '-' for col in row]):
+            row = ['-' * columnLen for i in row]
         for j, column in enumerate(row):
             table += pattern.format(column, length = columnLenList[j])
             if j < columnNum - 1:
