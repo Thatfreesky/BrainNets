@@ -106,7 +106,8 @@ def getSamplesForSubEpoch(numOfSamplesPerSubEpochTrain,
 
         assert len(samplesOfAPatient) == sum(numOfForeBackSamples)
         assert all([sample.shape == (len(modals), zSize, xSize, ySize) 
-                    for sample in samplesOfAPatient])
+                    for sample in samplesOfAPatient]), '{}'.format([s.shape 
+                                                                    for s in samplesOfAPatient])
 
         # For short the assert statements.
         rF = receptiveField
@@ -118,9 +119,9 @@ def getSamplesForSubEpoch(numOfSamplesPerSubEpochTrain,
         samplesList += samplesOfAPatient
         labelsList += labelsOfAPatient
 
-        logger.info('Get {} / {} samples from {} patients'.format(len(samplesOfAPatient), 
-                                                                  numOfSamplesPerSubEpochTrain, 
-                                                                  idx + 1))
+        logger.info('Get {} / {} samples from {} patients'.format(len(samplesList), 
+                                                                    numOfSamplesPerSubEpochTrain, 
+                                                                    idx + 1))
 
     # Release the memory.
     del samplesOfAPatient[:], samplesOfAPatient
@@ -182,13 +183,18 @@ def sampleAPatient(patientImageArray,
 
     samplesCdList = foreSamplesCdList + backSamplesCdList
 
-    samplesOfAPatient = getSamplesOfAPatient(patientImageArray, samplesCdList)
-    labelsOfAPatient = getLabelsOfAPatient(gTArray, samplesCdList, receptiveField)
+    samplesOfAPatient = getSamplesOfAPatient(patientImageArray, 
+                                             samplesCdList,
+                                             trainSampleSize)
+    labelsOfAPatient = getLabelsOfAPatient(gTArray, 
+                                           samplesCdList, 
+                                           receptiveField, 
+                                           trainSampleSize)
 
     return samplesOfAPatient, labelsOfAPatient
 
 
-def getSamplesOfAPatient(patientImageArray, samplesCdList):
+def getSamplesOfAPatient(patientImageArray, samplesCdList, trainSampleSize):
 
     logger = logging.getLogger(__name__)
 
@@ -197,7 +203,6 @@ def getSamplesOfAPatient(patientImageArray, samplesCdList):
     for sampleCd in samplesCdList:
 
         # sampleCd is a list.
-        # sampleCd[0] is a 
         sampleArrayList = []
 
         for modal in patientImageArray:
@@ -209,6 +214,11 @@ def getSamplesOfAPatient(patientImageArray, samplesCdList):
             yRight = sampleCd[2][1]
             sampleArrayList.append(modal[zLeft:zRight, xLeft: xRight, yLeft: yRight])
 
+            assert sampleArrayList[-1].shape == tuple(trainSampleSize), \
+                   '{}:{}:{}'.format(sampleArrayList[-1].shape, 
+                                     tuple(trainSampleSize), 
+                                     sampleCd)
+
         sampleArray = np.asarray(sampleArrayList, dtype = theano.config.floatX)
         samplesOfAPatient.append(sampleArray)
 
@@ -216,11 +226,14 @@ def getSamplesOfAPatient(patientImageArray, samplesCdList):
 
 
 
-def getLabelsOfAPatient(gTArray, samplesCdList, receptiveField):
+def getLabelsOfAPatient(gTArray, samplesCdList, receptiveField, trainSampleSize):
 
     logger = logging.getLogger(__name__)
 
     labelsOfAPatient = []
+    labelSize = [axleSize - receptiveField + 1 
+                 for axleSize in trainSampleSize]
+    labelSize = tuple(labelSize)
 
     rFRadius = receptiveField / 2
 
@@ -233,6 +246,8 @@ def getLabelsOfAPatient(gTArray, samplesCdList, receptiveField):
         yRight = sampleCd[2][1] - rFRadius
 
         labelsOfAPatient.append(gTArray[zLeft:zRight, xLeft: xRight, yLeft: yRight])
+        assert labelsOfAPatient[-1].shape == labelSize, \
+               '{}:{}'.format(labelsOfAPatient[-1].shape, labelSize)
 
     return labelsOfAPatient
 
@@ -243,9 +258,12 @@ def getSamplesCoordinateList(mask, numOfSamples, trainSampleSize):
     logger = logging.getLogger(__name__)
 
     maskShape = mask.shape
+    # If trainSampleSize = [25, 25, 25],
+    # the centerLocOfSampleSize = [13, 13, 13]
     centerLocOfSampleSize = [int(math.ceil(axle / 2))
                              for axle in trainSampleSize]
 
+    logger.debug('centerLocOfSampleSize: {}'.format(centerLocOfSampleSize))
     # In fact, I am not sure the axles is this order (z, x, y).
     # But no matter at here.
     halfLZAxle = centerLocOfSampleSize[0] - 1
@@ -255,24 +273,25 @@ def getSamplesCoordinateList(mask, numOfSamples, trainSampleSize):
     halfLYAxle = centerLocOfSampleSize[2] - 1
     halfRYAxle = trainSampleSize[2] - centerLocOfSampleSize[2]
 
+    # The halfAxles = [[12, 12],[12, 12], [12, 12]]
     halfAxles = [[halfLZAxle, halfRZAxle], 
                  [halfLXAxle, halfRXAxle], 
                  [halfLYAxle, halfRYAxle]]
 
-    assert [sum(pair) + 1 for pair in halfAxles] == list(trainSampleSize), \
+    assert [sum(pair) + 1 for pair in halfAxles] == trainSampleSize, \
             'halfAxles: {}, trainSampleSize: {}'.format(halfAxles, trainSampleSize)
 
     # TODO. The effluence of the dtype of those ROI array.
     centerLocROI = np.zeros(maskShape, dtype = 'int16')
     # Attention, the index of python is begin from 0
-    centerLocROI[halfLZAxle - 1:maskShape[0] - halfRZAxle - 1, 
-                 halfLXAxle - 1:maskShape[1] - halfRXAxle - 1,
-                 halfLYAxle - 1:maskShape[2] - halfRYAxle - 1] = 1
+    centerLocROI[halfLZAxle:maskShape[0] - halfRZAxle, 
+                 halfLXAxle:maskShape[1] - halfRXAxle,
+                 halfLYAxle:maskShape[2] - halfRYAxle] = 1
 
     # Just for assert statement.
-    checkArray = centerLocROI[halfLZAxle - 1:maskShape[0] - halfRZAxle - 1, 
-                              halfLXAxle - 1:maskShape[1] - halfRXAxle - 1,
-                              halfLYAxle - 1:maskShape[2] - halfRYAxle - 1]
+    checkArray = centerLocROI[halfLZAxle:maskShape[0] - halfRZAxle, 
+                              halfLXAxle:maskShape[1] - halfRXAxle,
+                              halfLYAxle:maskShape[2] - halfRYAxle]
     assert all([checkArray.shape[idx] + trainSampleSize[idx] - 1 == maskShape[idx]
                 for idx in range(len(trainSampleSize))])
     del checkArray
@@ -314,6 +333,10 @@ def getSamplesCoordinateList(mask, numOfSamples, trainSampleSize):
         # I think here we should better to convert the array type to int.
         lCoord = (samplesLCoord[0][idx], samplesLCoord[1][idx], samplesLCoord[2][idx])
         rCoord = (samplesRCoord[0][idx], samplesRCoord[1][idx], samplesRCoord[2][idx])
+
+        # For assert
+        rangeList = [rCoord[idx] - lCoord[idx] for idx in xrange(len(lCoord))]
+        assert rangeList == trainSampleSize, '{}:{}'.format(rangeList, trainSampleSize)
 
         # sampleCoord is a list.
         sampleCoord = zip(lCoord, rCoord)

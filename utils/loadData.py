@@ -30,7 +30,7 @@ def loadSinglePatientData(patientDir, useROI, modals, normType):
     del imageArrayList[:], imageArrayList
     assert patientImageArray.shape == (len(modals), 155, 240, 240)
 
-    patientLabelArray = np.asarray(labelArrayList, dtype = 'int16')
+    patientLabelArray = np.asarray(labelArrayList, dtype = 'int32')
     del labelArrayList[:], labelArrayList
     assert patientLabelArray.shape == (1 + int(useROI), 155, 240, 240)
 
@@ -95,8 +95,11 @@ def findImgAndLabelFileNameList(patientDir, useROI, modals, normType):
     # Release the assigned number.
     reorderImageNameList = [pair[1] for pair in reorderImageNameList]
 
-    logger.info('We reorder the imageNameList from {} to {}.'.format(imageNameList, 
-                                                                     reorderImageNameList))
+    # For logger.
+    imgShortNameLs = [findModalName(fileName) for fileName in imageNameList]
+    reorderImgShortNameLs = [findModalName(fileName) for fileName in reorderImageNameList]
+    logger.debug('We reorder the imageNameList from {} to {}.'.format(imgShortNameLs, 
+                                                                     reorderImgShortNameLs))
     imageNameList = reorderImageNameList
 
     # Now turn to the label name list.
