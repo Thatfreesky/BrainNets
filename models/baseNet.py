@@ -47,7 +47,8 @@ class BaseNet():
         self.preTrainedWeights = self.configInfo['preTrainedWeights']
 
         # For displaying the output shape change process through the network.
-        self.inputChannels = len(self.configInfo['modals'])
+        self.modals = self.configInfo['modals']
+        self.inputChannels = len(self.modals)
         self.trainSampleSize = self.configInfo['trainSampleSize']
         self.kernelShapeList = self.configInfo['kernelShapeList']
         self.kernelNumList = self.configInfo['kernelNumList']
@@ -82,7 +83,7 @@ class BaseNet():
 
         self.optimizer = self.optimizerDict[self.configInfo['optimizer']]
 
-        self.trainFunc = self.complieTrainFunction()
+        self.trainFunction = self.complieTrainFunction()
 
 
         # ----------------------------------------------------------------------------------------
@@ -186,7 +187,7 @@ class BaseNet():
                               for idx in xrange(-3, 0)]
         assert receptiveFieldList != []
         receptiveFieldSet = set(receptiveFieldList)
-        assert len(receptiveFieldSet) == 1
+        assert len(receptiveFieldSet) == 1, (receptiveFieldSet, inputShape, get_output_shape(conv3D, input_shapes = inputShape))
         self.receptiveField = list(receptiveFieldSet)[0]
 
         # Just for summary the fitler shape.
@@ -322,9 +323,9 @@ class BaseNet():
 
         inputImageShape = T.shape(self.inputVar)
         labelTensorShape = (inputImageShape[0], 
-                            inputImageShape[2] - self.receptiveField, 
-                            inputImageShape[2] - self.receptiveField, 
-                            inputImageShape[2] - self.receptiveField)
+                            inputImageShape[2] - self.receptiveField + 1, 
+                            inputImageShape[3] - self.receptiveField + 1, 
+                            inputImageShape[3] - self.receptiveField + 1)
 
         testPredictionLabel = T.argmax(testPrediction, axis = 1)
         testPredictionLabelTensor = T.reshape(testPredictionLabel, newshape = labelTensorShape)
@@ -380,7 +381,12 @@ class BaseNet():
 
     def summary(self, inputShape):
 
-        self.buildBaseNet(inputShape, forSummary = True)
+        inputShapeForSummary = (None, 
+                                len(self.modals), 
+                                inputShape[0], 
+                                inputShape[1], 
+                                inputShape[2])
+        self.buildBaseNet(inputShapeForSummary, forSummary = True)
 
         return self._summary
 
