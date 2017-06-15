@@ -5,7 +5,7 @@ import logging
 import os
 
 
-def loadSinglePatientData(patientDir, useROI, modals, normType):
+def loadSinglePatientData(patientDir, useROI, modals, normType, forTestData = False):
 
     logger = logging.getLogger(__name__)
 
@@ -14,30 +14,38 @@ def loadSinglePatientData(patientDir, useROI, modals, normType):
     imageNameList, labelNameList = findImgAndLabelFileNameList(patientDir, 
                                                                useROI, 
                                                                modals, 
-                                                               normType)
+                                                               normType,
+                                                               forTestData)
 
     imageNameWithPathList = [os.path.join(patientDir, imageName) 
                              for imageName in imageNameList]
-    labelNameWithPathList = [os.path.join(patientDir, labelName)
-                             for labelName in labelNameList]
-
+    
     imageArrayList = [readImageArray(imageNameWithPath) 
                       for imageNameWithPath in imageNameWithPathList]
-    labelArrayList = [readImageArray(labelNameWithPath) 
-                      for labelNameWithPath in labelNameWithPathList]
 
     patientImageArray = np.asarray(imageArrayList, dtype = theano.config.floatX)
     del imageArrayList[:], imageArrayList
     assert patientImageArray.shape == (len(modals), 155, 240, 240)
 
+    if len(labelNameList) == 0:
+        assert forTestData and not useROI
+        return patientImageArray, []
+
+
+    labelNameWithPathList = [os.path.join(patientDir, labelName)
+                             for labelName in labelNameList]
+
+    labelArrayList = [readImageArray(labelNameWithPath) 
+                      for labelNameWithPath in labelNameWithPathList]
+
     patientLabelArray = np.asarray(labelArrayList, dtype = 'int32')
     del labelArrayList[:], labelArrayList
-    assert patientLabelArray.shape == (1 + int(useROI), 155, 240, 240)
+    assert patientLabelArray.shape == (int(not forTestData) + int(useROI), 155, 240, 240)
 
     return patientImageArray, patientLabelArray
 
 
-def findImgAndLabelFileNameList(patientDir, useROI, modals, normType):
+def findImgAndLabelFileNameList(patientDir, useROI, modals, normType, forTestData):
 
     logger = logging.getLogger(__name__)
 
@@ -47,8 +55,10 @@ def findImgAndLabelFileNameList(patientDir, useROI, modals, normType):
     labelNameList = []
 
     for item in os.listdir(patientDir):
+        if item.endswith('txt'): 
+            continue
 
-        assert item.endswith('.mha')
+        assert item.endswith('.mha'), (item, patientDir)
 
         if normType == 0:
             prefix  = 'normImage'
@@ -75,13 +85,14 @@ def findImgAndLabelFileNameList(patientDir, useROI, modals, normType):
             labelNameList.append(item)
             continue
 
-        if itemNameSegList[-3] == 'OT':
+        if itemNameSegList[-3] == 'OT' and not forTestData:
             labelNameList.append(item)
 
 
 
     assert len(imageNameList) == len(modals), '{} == {}'.format(imageNameList, modals)
-    assert len(labelNameList) == 1 + int(useROI), '{} == {}'.format(labelNameList, 1 + int(useROI))
+    assert len(labelNameList) == int(not forTestData) + int(useROI), \
+                                '{} == {}'.format(labelNameList, int(not forTestData) + int(useROI))
 
     # This two lists should contain different item.
     assert set(imageNameList) & set(labelNameList) == set()
@@ -104,9 +115,10 @@ def findImgAndLabelFileNameList(patientDir, useROI, modals, normType):
 
     # Now turn to the label name list.
     if not useROI:
-        assert len(labelNameList) == 1
-    else:
-        # Firrst, we extract the ground truth file name
+        assert len(labelNameList) == int(not forTestData)
+    elif not forTestData:
+        # First, we extract the ground truth file name
+        assert len(labelNameList) == 2
         groundTruthList = [fileName 
                            for fileName in labelNameList 
                            if fileName.split('.')[-3] == 'OT']

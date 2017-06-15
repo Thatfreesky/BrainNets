@@ -67,6 +67,7 @@ class BaseNet():
         self.targetVar = T.tensor4('targetVar', dtype = 'int32')
         self.receptiveField = 'Only after building the BaseNet, can we get the receptive filed'
         self.outputLayer = self.buildBaseNet()
+        self.restoreWeights()
 
         # ----------------------------------------------------------------------------------------
         # For comlile train function.
@@ -234,10 +235,8 @@ class BaseNet():
             message = 'Finish Building the Architecture of BaseNet'
             self.logger.info(logMessage('+', message))
 
+        summary += '.' * 130 + '\n'
         self._summary = summary
-
-        if self.preTrainedWeights != '':
-            self.restoreWeights()
 
         return baseNet
 
@@ -319,35 +318,10 @@ class BaseNet():
         testPrediction = get_output(self.outputLayer, 
                                     deterministic = True,
                                     batch_norm_use_averages=False)
-        # TODO. Chack wheather the flatten style of targetvar and output are same.
-
-        inputImageShape = T.shape(self.inputVar)
-        labelTensorShape = (inputImageShape[0], 
-                            inputImageShape[2] - self.receptiveField + 1, 
-                            inputImageShape[3] - self.receptiveField + 1, 
-                            inputImageShape[3] - self.receptiveField + 1)
-
+       
         testPredictionLabel = T.argmax(testPrediction, axis = 1)
-        testPredictionLabelTensor = T.reshape(testPredictionLabel, newshape = labelTensorShape)
 
-        testOutput = [testPredictionLabelTensor]
-        assert None not in T.shape(testPredictionLabelTensor)
-
-        if self.targetVar != '':
-
-            print T.shape(testPredictionLabelTensor)
-            print T.shape(self.targetVar)
-            print T.shape(testPredictionLabelTensor) == T.shape(self.targetVar)
-            # assert T.shape(testPredictionLabelTensor) == T.shape(self.targetVar), \
-            #        '{}:{}'.format(T.shape(testPredictionLabelTensor), T.shape(self.targetVar))
-            self.flattenedTargetVar = T.flatten(self.targetVar)
- 
-            testACC = T.mean(T.eq(testPredictionLabel, self.flattenedTargetVar), 
-                        dtype = theano.config.floatX)
-
-            testOutput.append(testACC)
-
-        testFunc = theano.function([self.inputVar, self.targetVar], testOutput)
+        testFunc = theano.function([self.inputVar], [testPredictionLabel])
         
         message = 'Compiled the Test Function, spent {:.2f}s'.format(time.time()- startTime)
         self.logger.info(logMessage('+', message))
@@ -367,6 +341,9 @@ class BaseNet():
 
     def restoreWeights(self):
 
+        if self.preTrainedWeights != '':
+            pass
+
         assert self.preTrainedWeights != ''
 
         message = 'Load Weights from {}'.format(self.preTrainedWeights)
@@ -381,11 +358,14 @@ class BaseNet():
 
     def summary(self, inputShape):
 
-        inputShapeForSummary = (None, 
-                                len(self.modals), 
-                                inputShape[0], 
-                                inputShape[1], 
-                                inputShape[2])
+        if len(inputShape) == 3:
+            inputShapeForSummary = (None, 
+                                    len(self.modals), 
+                                    inputShape[0], 
+                                    inputShape[1], 
+                                    inputShape[2])
+        if len(inputShape) == 5:
+            inputShapeForSummary = inputShape
         self.buildBaseNet(inputShapeForSummary, forSummary = True)
 
         return self._summary

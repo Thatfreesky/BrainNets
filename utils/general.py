@@ -45,6 +45,7 @@ def logMessage(sample, message):
 
     # So, the message should better not long than 80
 
+    message = ' ' + message + ' '
     messageLen = len(message)
 
     maxLen = 130

@@ -14,7 +14,7 @@ import theano
 
 import general
 
-def normAndCreateROIForAllFiles(dataPath, outputPath):
+def normAndCreateROIForAllFiles(dataPath, outputPath, forTestData = False):
 
     '''
     For the Brats 2015 training data, we should assign the path of BRATS2015_Training
@@ -66,14 +66,22 @@ def normAndCreateROIForAllFiles(dataPath, outputPath):
 
             haveCreatedROIFile = False
 
+            folderNum = len(os.listdir(patientDir))
+            if (forTestData and folderNum != 4) or (not folderNum and folderNum != 5):
+                print patientDir
+
             for modalDirItem in os.listdir(patientDir):
 
                 modalDir = os.path.join(patientDir, modalDirItem)
 
-                modalFileList = [fileItem for fileItem in os.listdir(modalDir) if fileItem.endswith('.mha')]
-                assert len(modalFileList) == 1
+                modalFileList = [fileItem for fileItem in os.listdir(modalDir) 
+                                 if fileItem.endswith('.mha') or fileItem.endswith('.nii')]
+                assert len(modalFileList) == 1, (patientDir, modalFileList)
 
                 modalFileName = modalFileList[0]
+                if modalFileName.endswith('.nii'):
+                    print patientDir
+                    continue
 
                 # Althrough we create the normalization file, but thet are so large compare to 
                 # the orgimal file and. I guess we can not read all files in memory. So, we also
@@ -93,7 +101,10 @@ def normAndCreateROIForAllFiles(dataPath, outputPath):
                     # TODO. Wheather the ROI files created by different modals are same?
                 haveCreatedROIFile = True
 
-            assert len(os.listdir(ROIPatientDir)) == 14
+            if forTestData: 
+                assert len(os.listdir(ROIPatientDir)) == 13
+            else:
+                assert len(os.listdir(ROIPatientDir)) == 14
 
         logger.info('Create ROI and normalize {} {} patients data files'.format(len(os.listdir(gradeDir)), gradeDirItem))
 

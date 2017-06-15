@@ -299,10 +299,12 @@ def getLabelsOfAPatient(gTArray, samplesCdList, receptiveField, trainSampleSize)
         yLeft = sampleCd[2][0] + rFRadius
         yRight = sampleCd[2][1] - rFRadius
 
-        labelsCdList.append([[zLeft, zRight], [xLeft, xRight], [yLeft, yLeft]])
-        labelsOfAPatient.append(gTArray[zLeft:zRight, xLeft: xRight, yLeft: yRight])
-        assert labelsOfAPatient[-1].shape == labelSize, \
-               '{}:{}'.format(labelsOfAPatient[-1].shape, labelSize)
+        labelsCdList.append([[zLeft, zRight], [xLeft, xRight], [yLeft, yRight]])
+        
+        if gTArray != []:
+            labelsOfAPatient.append(gTArray[zLeft:zRight, xLeft: xRight, yLeft: yRight])
+            assert labelsOfAPatient[-1].shape == labelSize, \
+                   '{}:{}'.format(labelsOfAPatient[-1].shape, labelSize)
 
     return labelsOfAPatient, labelsCdList
 
@@ -465,28 +467,35 @@ def sampleWholeImage(patientDir,
                      modals, 
                      normType, 
                      testSampleSize, 
-                     receptiveField):
+                     receptiveField,
+                     forTestData = False):
 
     patientImageArray, patientLabelArray = loadData.loadSinglePatientData(patientDir, 
                                                                           useROITest, 
                                                                           modals, 
-                                                                          normType)
+                                                                          normType,
+                                                                          forTestData)
 
     assert patientImageArray.shape == (len(modals), 155, 240, 240)
-    assert patientLabelArray.shape == (1 + int(useROITest), 155, 240, 240), \
-           '{} == {}'.format(patientLabelArray.shape, (1 + int(useROITest), 155, 240, 240))
-
     assert isinstance(patientImageArray, np.ndarray)
-    assert isinstance(patientLabelArray, np.ndarray)
+    if patientLabelArray != []:
+        assert isinstance(patientLabelArray, np.ndarray)
+        assert patientLabelArray.shape == (int(not forTestData) + int(useROITest), 155, 240, 240), \
+               '{} == {}'.format(patientLabelArray.shape, (1 + int(useROITest), 155, 240, 240))
+    else:
+        assert forTestData and not useROITest
 
     imageShape = list(patientImageArray[0].shape)
 
     if useROITest:
-        ROIArray = patientLabelArray[1]
+        ROIArray = patientLabelArray[-1]
     else:
         ROIArray = np.ones(imageShape, dtype = 'int16')
 
-    gTArray = patientImageArray[0]
+    if not forTestData:
+        gTArray = patientImageArray[0]
+    else:
+        gTArray = []
 
     labelShape = [axle - receptiveField + 1 for axle in testSampleSize]
     labelShapeArray = np.asarray(labelShape, dtype = 'int16')
@@ -504,8 +513,8 @@ def sampleWholeImage(patientDir,
                                                                   wholeImageCoordList, 
                                                                   receptiveField, 
                                                                   testSampleSize)
-                     
-    assert len(samplesOfWholeImage) == len(labelsOfWholeImage) == len(wholeLabelCoordList)
+    if not forTestData:
+        assert len(samplesOfWholeImage) == len(labelsOfWholeImage) == len(wholeLabelCoordList)
 
     return samplesOfWholeImage, labelsOfWholeImage, wholeLabelCoordList, imageShape
 
