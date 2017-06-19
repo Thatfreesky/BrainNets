@@ -341,8 +341,8 @@ class BaseNet():
 
     def restoreWeights(self):
 
-        if self.preTrainedWeights != '':
-            pass
+        if self.preTrainedWeights == '':
+            return
 
         assert self.preTrainedWeights != ''
 

@@ -9,9 +9,10 @@ import time
 import gc
 import datetime
 
-from utils.sampling import getSamplesForSubEpoch, sampleWholeImage
+from utils.sampling import getSamplesForSubEpoch, sampleWholeBrain
 from utils.loadData import loadSinglePatientData
 from utils.general import logMessage, logTable
+from utils.metrics import voxleWiseMetrics
 from models.sectorNet import SectorNet
 from models.baseNet import BaseNet
 
@@ -178,6 +179,7 @@ def trainNetwork(network, configFile):
     # Make sure there are no same elements in the patientsDirList
     assert len(patientsDirList) == len(set(patientsDirList))
     random.shuffle(patientsDirList)
+    patientsDirList = patientsDirList[:numOfPatients]
     # ---------------------------------------------------------------------------
     # Divide patients dir in two part according to trainValRatio
     patsDirForValList = patientsDirList[::trainValRatio + 1]
@@ -210,17 +212,24 @@ def trainNetwork(network, configFile):
 
     # Prepare a table to record and show training and validation results
     # ===========================================================================
-    tableRowList = []
-    tableRowList.append(['-', '-', '-', '-', '-', '-', '-', '-', '-'])
-    tableRowList.append(['EPOCH',      'SUBEPOCH',    'Sampling Time', 
-                         'Train Loss', 'Train ACC',   'Train Time', 
-                         'Val Loss',   'Val ACC',     'Val Time'])
-    tableRowList.append(['-', '-', '-', '-', '-', '-', '-', '-', '-'])
+    trainTRowList = []
+    trainTRowList.append(['-', '-', '-', '-', '-', '-'])
+    trainTRowList.append(['EPOCH',      'SUBEPOCH',    'Train Time', 
+                          'Train Loss', 'Train ACC',   'Sampling Time'])
+    trainTRowList.append(['-', '-', '-', '-', '-', '-'])
+    # ***************************************************************************
+    valTRowList = []
+    valTRowList.append(['-', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-'])
+    valTRowList.append(['EPOCH',               'SUBEPOCH',            'Val Time', 
+                        'Val Complete Dice',   'Val Complete Sens',   'Val Complete Spec', 
+                        'Val Core Dice',       'Val Core Sens',       'Val Core Spec', 
+                        'Val Enhancing Dice',  'Val Enhancing Sens',  'Val Enhancing Spec',])
+    valTRowList.append(['-', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-'])
     # ===========================================================================
 
     # Prepare folder to store network weights during training
     # ===========================================================================
-    storeTime = time.strftime('%y-%m-%d_%H:%m:%S')
+    storeTime = time.strftime('%y-%m-%d_%H:%M:%S')
     weightsDir = os.path.join(weightsFolder, str(storeTime))
     os.mkdir(weightsDir)
     # ===========================================================================
@@ -238,11 +247,21 @@ def trainNetwork(network, configFile):
         trainEpACC = 0
         trainEpBatchNum = 0
         # **********************************************************************************************
-        valEpLoss = 0
-        valEpACC = 0
-        valEpBatchNum = 0
+        valEpCTDice = 0
+        valEpCTSens = 0
+        valEpCTSpec = 0
+
+        valEpCoreDice = 0
+        valEpCoreSens = 0
+        valEpCoreSpec = 0
+
+        valEpEnDice = 0
+        valEpEnSens = 0
+        valEpEnSpec = 0
+
+        valEpPatsNum = 0
         # **********************************************************************************************
-        epSampleTime = 0
+        epTrainSampleTime = 0
         epTrainTime = 0
         epValTime = 0
         # ==============================================================================================
@@ -254,8 +273,8 @@ def trainNetwork(network, configFile):
 
             # Training
             # ==========================================================================================
-            # Sample training data
-            sampleTime = time.time()
+            # Train sample training data
+            trainSampleTime = time.time()
             message = 'Sampling Training Data'
             logger.info(logMessage('-', message))
             trainSampleAndLabelList = getSamplesForSubEpoch(numOfTrainSamplesPerSubEpoch,
@@ -269,8 +288,8 @@ def trainNetwork(network, configFile):
                                                        usePoolToSample)
 
             trainSamplesList, trainLabelsList = trainSampleAndLabelList
-            sampleTime = time.time() - sampleTime
-            epSampleTime += sampleTime
+            trainSampleTime = time.time() - trainSampleTime
+            epTrainSampleTime += trainSampleTime
             # -----------------------------------------------------------------------------------------
             # Prepare for train batch loop
             trainBatchIdxList = [trainBatchIdx for trainBatchIdx 
@@ -317,65 +336,61 @@ def trainNetwork(network, configFile):
 
             # Validation
             # ========================================================================================
-            # Sample validatation data
-            message = 'Sampling Validation Data'
-            logger.info(logMessage('-', message))
-            valSampleAndLabelList = getSamplesForSubEpoch(numOfValSamplesPerSubEpoch,
-                                                          patsDirForValList,
-                                                          useROI,
-                                                          modals,
-                                                          normType,
-                                                          valSampleSize ,
-                                                          receptiveField,
-                                                          weightMapType,
-                                                          usePoolToSample)
+            valSubEpCTDice = 0
+            valSubEpCTSens = 0
+            valSubEpCTSpec = 0
 
-            valSamplesList, valLabelsList = valSampleAndLabelList
-            sampleTime += time.time() - trainTime 
-            epSampleTime += sampleTime
-            # ---------------------------------------------------------------------------------------
-            # Prepare for val batch loop
-            valBatchIdxList = [valBatchIdx for valBatchIdx 
-                               in xrange(0, numOfValSamplesPerSubEpoch, batchSize)]
+            valSubEpCoreDice = 0
+            valSubEpCoreSens = 0
+            valSubEpCoreSpec = 0
 
-            # For the last batch not to be too small.
-            valBatchIdxList[-1] = numOfValSamplesPerSubEpoch
+            valSubEpEhDice= 0
+            valSubEpEhSens = 0
+            valSubEpEhSpec = 0
 
-            assert len(valBatchIdxList) > 1
-            valBatchNum = len(valBatchIdxList[:-1])
-            # ---------------------------------------------------------------------------------------
-            # Validation batch loop
-            valSubEpLoss = 0
-            valSubEpACC = 0
-            valSubEpBatchNum = 0
+            valSubEpPatsNum = 0
             valTime = time.time()
             message = 'Validation'
             logger.info(logMessage(':', message))
-            # .......................................................................................
-            for valBatchIdx in xrange(valBatchNum):
-                # Just for calear.
-                valStartIdx = valBatchIdxList[valBatchIdx]
-                valEndIdex = valBatchIdxList[valBatchIdx + 1]
+            for patIdx, patientDir in enumerate(patsDirForValList):
+                logger.info('Val {}/{} patient'.format(patIdx + 1, len(patsDirForValList)))
+                segmentResult, segmentResultMask, gTArray = segmentWholeBrain(network,
+                                                                              patientDir,
+                                                                              useROI,
+                                                                              modals,
+                                                                              normType,
+                                                                              valSampleSize,
+                                                                              receptiveField,
+                                                                              False,
+                                                                              batchSize)
+                assert gTArray != []
+                cTDice, cTSens, cTSpeci = voxleWiseMetrics(segmentResult, 
+                                                           gTArray, 
+                                                           [1, 2, 3, 4])
+                coreDice, cTSens, cTSpec = voxleWiseMetrics(segmentResult, 
+                                                            gTArray, 
+                                                            [1, 3, 4])
+                ehDice, ehSens, ehSpec = voxleWiseMetrics(segmentResult, 
+                                                          gTArray, 
+                                                          [4])
+                valSubEpCTDice += cTDice
+                valSubEpCTSens += cTSens
+                valSubEpCTSpec += cTSpeci
 
-                valSamplesBatch = valSamplesList[valStartIdx:valEndIdex]
-                valSamplesBatch = np.asarray(valSamplesBatch, dtype = theano.config.floatX)
+                valSubEpCoreDice += coreDice
+                valSubEpCoreSens += cTSens
+                valSubEpCoreSpec += cTSpec
 
-                valLabelsBatch = valLabelsList[valStartIdx:valEndIdex]
-                valLabelsBatch = np.asarray(valLabelsBatch, dtype = 'int32')
+                valSubEpEhDice += ehDice
+                valSubEpEhSens += ehSens
+                valSubEpEhSpec += ehSpec
 
-                valBatchLoss, valBatchAcc = network.valFunction(valSamplesBatch, valLabelsBatch)
-                # Record subepoch validation results.
-                valSubEpLoss += valBatchLoss
-                valSubEpACC += valBatchAcc
-                valSubEpBatchNum += 1
+                del segmentResult, segmentResultMask, gTArray
+                gc.collect()
+
+            valSubEpPatsNum = len(patientDir)
             valTime = time.time() - valTime
             epValTime += valTime
-            # .........................................................................................
-            # Release source
-            del valSamplesList[:], valLabelsList[:]
-            del valSamplesList, valLabelsList
-            del valSamplesBatch, valLabelsBatch
-            gc.collect()
             # =========================================================================================
 
             # Record epooch results and compute subepoch results
@@ -394,30 +409,65 @@ def trainNetwork(network, configFile):
             # Record epooch validation results and computer validation subepoch results
             # -----------------------------------------------------------------------------------------
             # Record validation epoch results
-            valEpLoss += valSubEpLoss
-            valEpACC += valSubEpACC
-            valEpBatchNum += valSubEpBatchNum
+            valEpCTDice += valSubEpCTDice
+            valEpCTSens += valSubEpCTSens
+            valEpCTSpec += valSubEpCTSpec
+
+            valEpCoreDice += valSubEpCoreDice
+            valEpCoreSens += valSubEpCoreSens
+            valEpCoreSpec += valSubEpCoreSpec
+
+            valEpEnDice += valSubEpEhDice
+            valEpEnSens += valSubEpEhSens
+            valEpEnSpec += valSubEpEhSpec
+
+            valEpPatsNum += valSubEpPatsNum
             # -----------------------------------------------------------------------------------------
             # Compute validation subepoch results
-            valSubEpLoss /= valSubEpBatchNum
-            valSubEpACC /= valSubEpBatchNum
+            valSubEpCTDice /= valSubEpPatsNum
+            valSubEpCTSens /= valSubEpPatsNum
+            valSubEpCTSpec /= valSubEpPatsNum
+
+            valSubEpCoreDice /= valSubEpPatsNum
+            valSubEpCoreSens /= valSubEpPatsNum
+            valSubEpCoreSpec /= valSubEpPatsNum
+
+            valSubEpEhDice /= valSubEpPatsNum
+            valSubEpEhSens /= valSubEpPatsNum
+            valSubEpEhSpec /= valSubEpPatsNum
             # =========================================================================================
 
             # Recording for subEpoch row of table
             # =========================================================================================
             indexColumn = epIdx + 1 if subEpIdx == 0 else ''
-            sampleTime = '{:.3}'.format(sampleTime)
+            # Recording for subEpoch row of training table
+            # -----------------------------------------------------------------------------------------
+            trainSampleTime = '{:.3}'.format(trainSampleTime)
             trainTime = '{:.3}'.format(trainTime)
-            valTime = '{:.3}'.format(valTime)
-
             trainSubEpLoss = '{:.6f}'.format(trainSubEpLoss)
             trainSubEpACC = '{:.6f}'.format(trainSubEpACC)
-            valSubEpLoss = '{:.6f}'.format(valSubEpLoss)
-            valSubEpACC = '{:.6f}'.format(valSubEpACC)
+            
+            trainTRowList.append([indexColumn,      subEpIdx + 1,      trainTime,
+                                 trainSubEpLoss,   trainSubEpACC,     trainSampleTime])
+            # *****************************************************************************************
+            # Recording for subepoch row of validation table
+            valTime = '{:.3}'.format(valTime)
+            valSubEpCTDice = '{:.6f}'.format(valSubEpCTDice)
+            valSubEpCTSens = '{:.6f}'.format(valSubEpCTSens)
+            valSubEpCTSpec = '{:.6f}'.format(valSubEpCTSpec)
 
-            tableRowList.append([indexColumn,      subEpIdx + 1,      sampleTime,
-                                 trainSubEpLoss,   trainSubEpACC,     trainTime,
-                                 valSubEpLoss,     valSubEpACC,       valTime])
+            valSubEpCoreDice = '{:.6f}'.format(valSubEpCoreDice)
+            valSubEpCoreSens = '{:.6f}'.format(valSubEpCoreSens)
+            valSubEpCoreSpec = '{:.6f}'.format(valSubEpCoreSpec)
+
+            valSubEpEhDice = '{:.6f}'.format(valSubEpEhDice)
+            valSubEpEhSens = '{:.6f}'.format(valSubEpEhSens)
+            valSubEpEhSpec = '{:.6f}'.format(valSubEpEhSpec)
+
+            valTRowList.append([indexColumn,      subEpIdx + 1,      valTime, 
+                                valSubEpCTDice,   valSubEpCTSens,    valSubEpCTSpec, 
+                                valSubEpCoreDice, valSubEpCoreSens,  valSubEpCoreSpec, 
+                                valSubEpEhDice,   valSubEpEhSens,    valSubEpEhSpec])
             # =========================================================================================
 
             # Subepoch logger
@@ -427,8 +477,9 @@ def trainNetwork(network, configFile):
             message += ' Train ACC: {}'.format(trainSubEpACC)
             logger.info(logMessage('-', message))
             message = 'Subepoch: {}/{} '.format(subEpIdx + 1, numOfSubEpochs)
-            message += ' Val Loss: {}, '.format(valSubEpLoss)
-            message += ' Val ACC: {}'.format(valSubEpACC)
+            message += ' Val Core Dice: {}, '.format(valSubEpCoreDice)
+            message += ' Val Core Sens: {}'.format(valSubEpCoreSens)
+            message += ' Val Core Spec: {}'.format(valSubEpCoreSpec)
             logger.info(logMessage('-', message))
             # =========================================================================================
            
@@ -439,26 +490,51 @@ def trainNetwork(network, configFile):
         trainEpACC /= trainEpBatchNum
         # *********************************************************************************************
         # Compute epoch validation results
-        valEpLoss /= valEpBatchNum
-        valEpACC /= valEpBatchNum
+        valEpCTDice /= valEpPatsNum
+        valEpCTSens /= valEpPatsNum
+        valEpCTSpec /= valEpPatsNum
+
+        valEpCoreDice /= valEpPatsNum
+        valEpCoreSens /= valEpPatsNum
+        valEpCoreSpec /= valEpPatsNum
+
+        valEpEnDice /= valEpPatsNum
+        valEpEnSens /= valEpPatsNum
+        valEpEnSpec /= valEpPatsNum
         # =============================================================================================
 
         # Recording for subEpoch row of table
         # =============================================================================================
-        epSampleTime = '{:.3}'.format(epSampleTime)
+        epTrainSampleTime = '{:.3}'.format(epTrainSampleTime)
         epTrainTime = '{:.3}'.format(epTrainTime)
         epValTime = '{:.3}'.format(epValTime)
-
+        # ---------------------------------------------------------------------------------------------
         trainEpLoss = '{:.6f}'.format(trainEpLoss)
         trainEpACC = '{:.6f}'.format(trainEpACC)
-        valEpLoss = '{:.6f}'.format(valEpLoss)
-        valEpACC = '{:.6f}'.format(valEpACC)
+        # ---------------------------------------------------------------------------------------------
+        trainTRowList.append(['-', '-', '-', '-', '-', '-'])
+        trainTRowList.append(['',               '',              epTrainSampleTime, 
+                              trainEpLoss,      trainEpACC,      epTrainTime])
+        trainTRowList.append(['-', '-', '-', '-', '-', '-'])
+        # *********************************************************************************************
+        valEpCTDice = '{:.6f}'.format(valEpCTDice)
+        valEpCTSens = '{:.6f}'.format(valEpCTSens)
+        valEpCTSpec = '{:.6f}'.format(valEpCTSpec)
 
-        tableRowList.append(['-', '-', '-', '-', '-', '-', '-', '-', '-'])
-        tableRowList.append(['',               '',              epSampleTime, 
-                             trainEpLoss,      trainEpACC,      epTrainTime, 
-                             valEpLoss,        valEpACC,        epValTime])
-        tableRowList.append(['-', '-', '-', '-', '-', '-', '-', '-', '-'])
+        valEpCoreDice = '{:.6f}'.format(valEpCoreDice)
+        valEpCoreSens = '{:.6f}'.format(valEpCoreSens)
+        valEpCoreSpec = '{:.6f}'.format(valEpCoreSpec)
+
+        valEpEnDice = '{:.6f}'.format(valEpEnDice)
+        valEpEnSens = '{:.6f}'.format(valEpEnSens)
+        valEpEnSpec = '{:.6f}'.format(valEpEnSpec)
+        # ---------------------------------------------------------------------------------------------
+        valTRowList.append(['-', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-'])
+        valTRowList.append(['',               '',                epValTime, 
+                            valEpCTDice,      valEpCTSens,       valEpCTSpec, 
+                            valEpCoreDice,    valEpCoreSens,     valEpCoreSpec, 
+                            valEpEnDice,      valEpEnSens,       valEpEnSpec])
+        valTRowList.append(['-', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-'])
         # =============================================================================================
         
         # Epoch logger
@@ -468,8 +544,9 @@ def trainNetwork(network, configFile):
         message += ' Train ACC: {}'.format(trainEpACC)
         logger.info(logMessage('+', message))
         message = 'Epoch: {}/{} '.format(epIdx + 1, numOfEpochs)
-        message += ' Val Loss: {}, '.format(valEpLoss)
-        message += ' Val ACC: {}'.format(valEpACC)
+        message += ' Val Core Dice: {}, '.format(valEpCoreDice)
+        message += ' Val Core Sens: {}'.format(valEpEnSens)
+        message += ' Val Core Spec: {}'.format(valEpEnSpec)
         logger.info(logMessage('+', message))
         # =============================================================================================
 
@@ -495,13 +572,20 @@ def trainNetwork(network, configFile):
     # =================================================================================================
     message = 'The Training Results'
     logger.info(logMessage('=', message))
-    logger.info(logTable(tableRowList))
+    logger.info(logTable(trainTRowList))
     logger.info(logMessage('=', '='))
     message = 'End Training Loops'
     logger.info(logMessage('#', message))
+    # *************************************************************************************************
+    message = 'The Validation Results'
+    logger.info(logMessage('=', message))
+    logger.info(logTable(valTRowList))
+    logger.info(logMessage('=', '='))
+    message = 'End Validation Loops'
+    logger.info(logMessage('#', message))
     # =================================================================================================
 
-    return tableRowList
+    return trainTRowList, valTRowList
 
 
 
@@ -585,7 +669,7 @@ def testNetwork(network, configFile):
 
     # Prepare output folder
     # ==========================================================
-    storeTime = time.strftime('%y-%m-%d_%H:%m:%S')
+    storeTime = time.strftime('%y-%m-%d_%H:%M:%S')
     outputDir = os.path.join(outputFolder, str(storeTime))
     os.mkdir(outputDir)
     # =================================================================================================
@@ -598,87 +682,117 @@ def testNetwork(network, configFile):
         # ---------------------------------------------------------------------------------------------
         # Sample test data
         # For short statement.
-        sampleWholeImageResult = sampleWholeImage(patientDir, 
-                                                  useROITest, 
-                                                  modals, 
-                                                  normType, 
-                                                  testSampleSize, 
-                                                  receptiveField,
-                                                  useTestData)
+        segmentResult, segmentResultMask, gTArray = segmentWholeBrain(network,
+                                                                      patientDir,
+                                                                      useROITest,
+                                                                      modals,
+                                                                      normType,
+                                                                      testSampleSize,
+                                                                      receptiveField,
+                                                                      True,
+                                                                      batchSize)
 
-        samplesOfWholeImage = sampleWholeImageResult[0]
-        labelsOfWholeImage = sampleWholeImageResult[1]
-        wholeLabelCoordList = sampleWholeImageResult[2]
-        imageShape = sampleWholeImageResult[3]
-
-        # ---------------------------------------------------------------------------------------------
-        # Prepare ndarray to record segment results for each patient
-        segmentResult = np.zeros(imageShape, dtype = 'int32')
-        segmentResultMask = np.zeros(imageShape, dtype = 'int16')
-        segmentResultNameWithPath = os.path.join(outputDir, patient)
-        # ---------------------------------------------------------------------------------------------
-        # Prepare for test batch loop
-        numOfSamples = len(wholeLabelCoordList)
-        batchIdxList = [batchIdx for batchIdx 
-                        in xrange(0, numOfSamples, batchSize)]
-
-        # For the last batch not to be too small.
-        batchIdxList[-1] = numOfSamples
-        batchNum = len(batchIdxList[:-1])
-        assert len(batchIdxList) > 1
-        # ---------------------------------------------------------------------------------------------
-        # Test batch loop
-        for batchIdx in xrange(batchNum):
-
-            startIdx = batchIdxList[batchIdx]
-            endIdex = batchIdxList[batchIdx + 1]
-
-            samplesBatch = samplesOfWholeImage[startIdx:endIdex]
-            samplesBatch = np.asarray(samplesBatch, dtype = theano.config.floatX)
-
-            labelsBatch = labelsOfWholeImage[startIdx:endIdex]
-            labelsBatch = np.asarray(labelsBatch, dtype = 'int32')
-
-            testPredictionLabel = network.testFunction(samplesBatch)
-            testPredictionLabel = testPredictionLabel[0]
-
-            assert isinstance(testPredictionLabel, np.ndarray)
-            labelZ = testSampleSize[0] - receptiveField + 1
-            labelX = testSampleSize[1] - receptiveField + 1
-            labelY = testSampleSize[2] - receptiveField + 1
-            testPredictionLabel = np.reshape(testPredictionLabel, (batchSize, labelZ, labelX, labelY))
-            assert testPredictionLabel.shape == (batchSize, labelZ, labelX, labelY)
-            # ----------------------------------------------------------------------------------------
-            # Store results of each batch
-            for idx, label in enumerate(testPredictionLabel):
-
-                assert batchIdx * batchSize == batchIdxList[batchIdx]
-
-                labelCoordIdx = batchIdx * batchSize + idx
-                labelCoord = wholeLabelCoordList[labelCoordIdx]
-                zL = labelCoord[0][0]
-                zR = labelCoord[0][1]
-                xL = labelCoord[1][0]
-                xR = labelCoord[1][1]
-                yL = labelCoord[2][0]
-                yR = labelCoord[2][1]
-                assert len(set([zR - zL, xR - xL, yR - yL])) == 1
-                segmentResult[zL:zR, xL:xR, yL:yR] = label
-                segmentResultMask[zL:zR, xL:xR, yL:yR] += np.ones(label.shape, dtype = 'int16')
-
-        assert not np.any(segmentResult)
+        assert gTArray == []
         # ---------------------------------------------------------------------------------------------
         # Save segment results for each patient
-        message = 'Saved results of {}'.format(patient)
-        logger.info(logMessage('-', message))
         np.save(segmentResultNameWithPath + 'result', segmentResult)
         np.save(segmentResultNameWithPath + 'resultMask', segmentResultMask)
+        message = 'Saved results of {}'.format(patient)
+        logger.info(logMessage('-', message))
     # =================================================================================================
 
 
 
 
+def segmentWholeBrain(network,
+                      patientDir,
+                      useROI,
+                      modals,
+                      normType,
+                      sampleSize,
+                      receptiveField,
+                      useTestData,
+                      batchSize):
+    # ---------------------------------------------------------------------------------------------
+    # Sample test data
+    # For short statement.
+    sampleWholeImageResult = sampleWholeBrain(patientDir, 
+                                              useROI, 
+                                              modals, 
+                                              normType, 
+                                              sampleSize, 
+                                              receptiveField,
+                                              useTestData)
 
+    samplesOfWholeImage = sampleWholeImageResult[0]
+    labelsOfWholeImage = sampleWholeImageResult[1]
+    wholeLabelCoordList = sampleWholeImageResult[2]
+    imageShape = sampleWholeImageResult[3]
+    gTArray = sampleWholeImageResult[4]
+    assert gTArray == [] if useTestData else gTArray != []
+    # ---------------------------------------------------------------------------------------------
+    # Prepare ndarray to record segment results for each patient
+    segmentResult = np.zeros(imageShape, dtype = 'int32')
+    segmentResultMask = np.zeros(imageShape, dtype = 'int16')
+    patient = patientDir.split('/')[-1]
+    assert patient.startswith('brats')
+    # ---------------------------------------------------------------------------------------------
+    # Prepare for test batch loop
+    numOfSamples = len(wholeLabelCoordList)
+    batchIdxList = [batchIdx for batchIdx 
+                    in xrange(0, numOfSamples, batchSize)]
+
+    # For the last batch not to be too small.
+    batchIdxList[-1] = numOfSamples
+    batchNum = len(batchIdxList[:-1])
+    assert len(batchIdxList) > 1
+    # ---------------------------------------------------------------------------------------------
+    # Test batch loop
+    for batchIdx in xrange(batchNum):
+
+        startIdx = batchIdxList[batchIdx]
+        endIdex = batchIdxList[batchIdx + 1]
+
+        samplesBatch = samplesOfWholeImage[startIdx:endIdex]
+        samplesBatch = np.asarray(samplesBatch, dtype = theano.config.floatX)
+
+        labelsBatch = labelsOfWholeImage[startIdx:endIdex]
+        labelsBatch = np.asarray(labelsBatch, dtype = 'int32')
+
+        testPredictionLabel = network.testFunction(samplesBatch)
+        testPredictionLabel = testPredictionLabel[0]
+
+        assert isinstance(testPredictionLabel, np.ndarray)
+        labelZ = sampleSize[0] - receptiveField + 1
+        labelX = sampleSize[1] - receptiveField + 1
+        labelY = sampleSize[2] - receptiveField + 1
+
+        assert testPredictionLabel.shape[0] == (endIdex - startIdx) * labelZ * labelY * labelX
+        testPredictionLabel = np.reshape(testPredictionLabel, 
+                                        ((endIdex - startIdx), labelZ, labelX, labelY))
+        assert testPredictionLabel.shape == ((endIdex - startIdx), labelZ, labelX, labelY)
+        # ----------------------------------------------------------------------------------------
+        # Store results of each batch
+        for idx, label in enumerate(testPredictionLabel):
+
+            assert batchIdx * batchSize == batchIdxList[batchIdx]
+
+            labelCoordIdx = batchIdx * batchSize + idx
+            labelCoord = wholeLabelCoordList[labelCoordIdx]
+            zL = labelCoord[0][0]
+            zR = labelCoord[0][1]
+            xL = labelCoord[1][0]
+            xR = labelCoord[1][1]
+            yL = labelCoord[2][0]
+            yR = labelCoord[2][1]
+            assert len(set([zR - zL, xR - xL, yR - yL])) == 1
+            segmentResult[zL:zR, xL:xR, yL:yR] = label
+            segmentResultMask[zL:zR, xL:xR, yL:yR] += np.ones(label.shape, dtype = 'int16')
+
+    assert np.any(segmentResult)
+    # ---------------------------------------------------------------------------------------------
+
+    return segmentResult, segmentResultMask, gTArray
 
 
 

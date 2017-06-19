@@ -462,7 +462,7 @@ def getForeAndBackMask(patientLabelArray,
 
 
 
-def sampleWholeImage(patientDir, 
+def sampleWholeBrain(patientDir, 
                      useROITest, 
                      modals, 
                      normType, 
@@ -493,7 +493,7 @@ def sampleWholeImage(patientDir,
         ROIArray = np.ones(imageShape, dtype = 'int16')
 
     if not forTestData:
-        gTArray = patientImageArray[0]
+        gTArray = patientLabelArray[0]
     else:
         gTArray = []
 
@@ -516,7 +516,7 @@ def sampleWholeImage(patientDir,
     if not forTestData:
         assert len(samplesOfWholeImage) == len(labelsOfWholeImage) == len(wholeLabelCoordList)
 
-    return samplesOfWholeImage, labelsOfWholeImage, wholeLabelCoordList, imageShape
+    return samplesOfWholeImage, labelsOfWholeImage, wholeLabelCoordList, imageShape, gTArray
 
 
 
