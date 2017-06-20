@@ -21,6 +21,7 @@ from lasagne.layers import (InputLayer,
                             get_all_param_values, 
                             get_output_shape, 
                             ReshapeLayer,
+                            DropoutLayer, 
                             prelu)
 
 from lasagne.regularization import regularize_network_params
@@ -28,8 +29,9 @@ from lasagne.nonlinearities import rectify, linear, softmax
 from lasagne.objectives import categorical_crossentropy
 
 from utils.general import logMessage, logTable
+from myLayers import DilatedConv3DLayer
 
-class BaseNet():
+class Dilated3DNet():
 
     def __init__(self, configFile):
 
@@ -37,13 +39,13 @@ class BaseNet():
         self.configInfo = {}
         execfile(configFile, self.configInfo)
 
-        assert self.configInfo['networkType'] == 'baseNet'
-        self.networkType = 'baseNet'
+        assert self.configInfo['networkType'] == 'dilated3DNet'
+        self.networkType = 'dilated3DNet'
 
         self.outputFolder = self.configInfo['outputFolder']
 
         # ----------------------------------------------------------------------------------------
-        # For build BaseNet.
+        # For build Dilated3DNet.
         self.preTrainedWeights = self.configInfo['preTrainedWeights']
 
         # For displaying the output shape change process through the network.
@@ -52,10 +54,12 @@ class BaseNet():
         self.trainSampleSize = self.configInfo['trainSampleSize']
         self.kernelShapeList = self.configInfo['kernelShapeList']
         self.kernelNumList = self.configInfo['kernelNumList']
+        self.dilatedFactorList = self.configInfo['dilatedFactorList']
         self.numOfClasses = self.configInfo['numOfClasses']
         self.dropoutRates = self.configInfo['dropoutRates']
 
         assert len(self.kernelShapeList) == len(self.kernelNumList)
+        assert len(self.kernelShapeList) == len(self.dilatedFactorList)
         assert self.numOfClasses == self.kernelNumList[-1]
 
         self.inputShape = (None, 
@@ -66,8 +70,8 @@ class BaseNet():
 
         self.inputVar = T.tensor5('inputVar', dtype = theano.config.floatX)
         self.targetVar = T.tensor4('targetVar', dtype = 'int32')
-        self.receptiveField = 'Only after building the BaseNet, can we get the receptive filed'
-        self.outputLayer = self.buildBaseNet()
+        self.receptiveField = 'Only after building the dilated3DNet, can we get the receptive filed'
+        self.outputLayer = self.buildDilated3DNet()
         self.restoreWeights()
 
         # ----------------------------------------------------------------------------------------
@@ -100,147 +104,127 @@ class BaseNet():
 
 
 
-    def buildBaseNet(self, inputShape = (None, 4, 25, 25, 25), forSummary = False):
+    def buildDilated3DNet(self, inputShape = (None, 4, 25, 25, 25)):
 
-        if not forSummary:
-            message = 'Building the Architecture of BaseNet'
-            self.logger.info(logMessage('+', message))
+        summaryRowList = [['-', '-', '-', '-', '-', '-']]
+        summaryRowList.append(['Numbering', 'Layer', 'Input Shape', '', 'W Shape', 'Output Shape'])
+        summaryRowList.append(['-', '-', '-', '-', '-', '-'])
+        dilated3DNet = InputLayer(self.inputShape, self.inputVar, name = 'InputLayer')
+        # ........................................................................................
+        # For summary
+        num = 1
+        layerName = 'Input'
+        inputS1 = inputShape
+        inputS2 = ''
+        WShape = ''
+        outputS = get_output_shape(dilated3DNet, input_shapes = inputShape)
+        summaryRowList.append([num, layerName, inputS1, inputS2, WShape, outputS])
+        # ........................................................................................
+        layerBlockNum = len(self.kernelNumList) - 1
 
-        baseNet = InputLayer(self.inputShape, self.inputVar)
+        for idx in xrange(layerBlockNum):
 
-        if not forSummary:
-            message = 'Building the convolution layers'
-            self.logger.info(logMessage('-', message))
+            dilatedLayer = DilatedConv3DLayer(dilated3DNet, 
+                                              self.kernelNumList[idx], 
+                                              self.kernelShapeList[idx], 
+                                              self.dilatedFactorList[idx], 
+                                              W = HeNormal(gain = 'relu'),
+                                              nonlinearity = linear)
+            # ....................................................................................
+            # For summary
+            num = idx + 2
+            layerName = 'Dilated'
+            inputS1 = get_output_shape(dilated3DNet, input_shapes = inputShape)
+            inputS2 = ''
+            WShape = dilatedLayer.W.get_value().shape
+            outputS = get_output_shape(dilatedLayer, input_shapes = inputShape)
+            summaryRowList.append([num, layerName, inputS1, inputS2, WShape, outputS])
+            # ....................................................................................
 
-        kernelShapeListLen = len(self.kernelNumList)
-
-        summary = '\n' + '.' * 130 + '\n'
-        summary += '    {:<15} {:<50} {:<29} {:<29}\n'.format('Layer', 
-                                                              'Input shape', 
-                                                              'W shape', 
-                                                              'Output shape')
-        summary += '.' * 130 + '\n'
-
-        summary += '{:<3} {:<15} {:<50} {:<29} {:<29}\n'.format(1, 
-                                                                'Input', 
-                                                                inputShape, 
-                                                                '',
-                                                                get_output_shape(baseNet, 
-                                                                input_shapes = inputShape))
-
-        for i in xrange(kernelShapeListLen - 1):
-
-            kernelShape = self.kernelShapeList[i]
-            kernelNum = self.kernelNumList[i]
-
-            conv3D = Conv3DLayer(incoming = baseNet,
-                                  num_filters = kernelNum,
-                                  filter_size = kernelShape,
-                                  W = HeNormal(gain = 'relu'),
-                                  nonlinearity = linear,
-                                  name = 'Conv3D{}'.format(i))
-
-            # Just for summary the fitler shape.
-            WShape = conv3D.W.get_value().shape
-
-            summary += '{:<3} {:<15} {:<50} {:<29} {:<29}\n'.format(i + 2, 
-                                                                    'Conv3D', 
-                                                                    get_output_shape(baseNet, input_shapes = inputShape), 
-                                                                    WShape,
-                                                                    get_output_shape(conv3D, input_shapes = inputShape))
-
-            batchNormLayer = BatchNormLayer(conv3D)
+            batchNormLayer = BatchNormLayer(dilatedLayer)
             preluLayer = prelu(batchNormLayer)
-            
-            concatLayerInputShape = '{:<25}{:<25}'.format(get_output_shape(conv3D, input_shapes = inputShape),
-                                                           get_output_shape(baseNet, input_shapes = inputShape))
+            concatLayer = ConcatLayer([preluLayer, dilatedLayer], 1, cropping = ['center', 
+                                                                                  'None', 
+                                                                                  'center', 
+                                                                                  'center', 
+                                                                                  'center'])
+            # ....................................................................................
+            # For summary
+            num = ''
+            layerName = 'Concat'
+            inputS1 = get_output_shape(dilatedLayer, input_shapes = inputShape)
+            inputS2 = get_output_shape(dilated3DNet, input_shapes = inputShape)
+            WShape = ''
+            outputS = get_output_shape(concatLayer, input_shapes = inputShape)
+            summaryRowList.append([num, layerName, inputS1, inputS2, WShape, outputS])
+            # ....................................................................................
 
-            baseNet = ConcatLayer([preluLayer, baseNet], 1, cropping = ['center', 
-                                                                        'None', 
-                                                                        'center', 
-                                                                        'center', 
-                                                                        'center'])
-
-            summary += '    {:<15} {:<50} {:<29} {:<29}\n'.format('Concat', 
-                                                                  concatLayerInputShape, 
-                                                                  '',
-                                                                  get_output_shape(baseNet, input_shapes = inputShape))
-        if not forSummary:
-            message = 'Finish Built the convolution layers'
-            self.logger.info(logMessage('-', message))
-
-            message = 'Building the last classfication layers'
-            self.logger.info(logMessage('-', message))
-
-        assert self.kernelShapeList[-1] == [1, 1, 1]
-
-        kernelShape = self.kernelShapeList[-1]
-        kernelNum = self.kernelNumList[-1]
-
-        conv3D = Conv3DLayer(incoming = baseNet,
-                              num_filters = kernelNum,
-                              filter_size = kernelShape,
-                              W = HeNormal(gain = 'relu'),
-                              nonlinearity = linear,
-                              name = 'Classfication Layer')
+            dilated3DNet = DropoutLayer(concatLayer, self.dropoutRates)
 
 
-        receptiveFieldList = [inputShape[idx] - get_output_shape(conv3D, input_shapes = inputShape)[idx] + 1
-                              for idx in xrange(-3, 0)]
-        assert receptiveFieldList != []
-        receptiveFieldSet = set(receptiveFieldList)
-        assert len(receptiveFieldSet) == 1, (receptiveFieldSet, inputShape, get_output_shape(conv3D, input_shapes = inputShape))
-        self.receptiveField = list(receptiveFieldSet)[0]
+        dilatedLayer = DilatedConv3DLayer(dilated3DNet, 
+                                          self.kernelNumList[-1], 
+                                          self.kernelShapeList[-1], 
+                                          self.dilatedFactorList[-1], 
+                                          W = HeNormal(gain = 'relu'),
+                                          nonlinearity = linear)
+        # ....................................................................................
+        # For summary
+        num = layerBlockNum + 1
+        layerName = 'Dilated'
+        inputS1 = get_output_shape(dilated3DNet, input_shapes = inputShape)
+        inputS2 = ''
+        WShape = dilatedLayer.W.get_value().shape
+        outputS = get_output_shape(dilatedLayer, input_shapes = inputShape)
+        summaryRowList.append([num, layerName, inputS1, inputS2, WShape, outputS])
+        # ....................................................................................
 
-        # Just for summary the fitler shape.
-        WShape = conv3D.W.get_value().shape
+        # For receptive field
+        receptiveFieldArray = np.asarray(inputShape)[2:] - np.asarray(outputS)[2:] + 1
+        assert not np.any(receptiveFieldArray - np.mean(receptiveFieldArray))
+        self.receptiveField = int(np.mean(receptiveFieldArray))
 
-        summary += '{:<3} {:<15} {:<50} {:<29} {:<29}\n'.format(kernelShapeListLen + 1, 
-                                                                'Conv3D', 
-                                                                get_output_shape(baseNet, input_shapes = inputShape), 
-                                                                WShape,
-                                                                get_output_shape(conv3D, input_shapes = inputShape))
+        dimshuffleLayer = DimshuffleLayer(dilatedLayer, (0, 2, 3, 4, 1))
+        # ....................................................................................
+        # For summary
+        num = ''
+        layerName = 'Dimshuffle'
+        inputS1 = get_output_shape(dilatedLayer, input_shapes = inputShape)
+        inputS2 = ''
+        WShape = ''
+        outputS = get_output_shape(dimshuffleLayer, input_shapes = inputShape)
+        summaryRowList.append([num, layerName, inputS1, inputS2, WShape, outputS])
+        # ....................................................................................
 
-        # The output shape should be (batchSize, numOfClasses, zSize, xSize, ySize).
-        # We will reshape it to (batchSize * zSize * xSize * ySize, numOfClasses),
-        # because, the softmax in theano can only receive matrix.
+        batchSize, zSize, xSize, ySize, kernelNum = get_output(dimshuffleLayer).shape
+        print get_output(dimshuffleLayer).shape, kernelNum
+        reshapeLayer = ReshapeLayer(dimshuffleLayer, (batchSize * zSize * xSize * ySize, kernelNum))
+        # ....................................................................................
+        # For summary
+        num = ''
+        layerName = 'Reshape'
+        inputS1 = get_output_shape(dimshuffleLayer, input_shapes = inputShape)
+        inputS2 = ''
+        WShape = ''
+        outputS = get_output_shape(reshapeLayer, input_shapes = inputShape)
+        summaryRowList.append([num, layerName, inputS1, inputS2, WShape, outputS])
+        # ....................................................................................
 
-        baseNet = DimshuffleLayer(conv3D, (0, 2, 3, 4, 1))
-        summary += '    {:<15} {:<50} {:<29} {:<29}\n'.format('Dimshuffle', 
-                                                              get_output_shape(conv3D, input_shapes = inputShape), 
-                                                              '',
-                                                              get_output_shape(baseNet, input_shapes = inputShape))
+        dilated3DNet = NonlinearityLayer(reshapeLayer, softmax)
+        # ....................................................................................
+        # For summary
+        num = ''
+        layerName = 'Nonlinearity'
+        inputS1 = get_output_shape(reshapeLayer, input_shapes = inputShape)
+        inputS2 = ''
+        WShape = ''
+        outputS = get_output_shape(dilated3DNet, input_shapes = inputShape)
+        summaryRowList.append([num, layerName, inputS1, inputS2, WShape, outputS])
+        summaryRowList.append(['-', '-', '-', '-', '-', '-'])
+        # ....................................................................................
+        self._summary = summaryRowList
 
-        batchSize, zSize, xSize, ySize, _ = get_output(baseNet).shape
-        reshapeLayerInputShape = get_output_shape(baseNet, input_shapes = inputShape)
-        baseNet = ReshapeLayer(baseNet, (batchSize * zSize * xSize * ySize, kernelNum))
-        summary += '    {:<15} {:<50} {:<29} {:<29}\n'.format('Reshape', 
-                                                              reshapeLayerInputShape, 
-                                                              '',
-                                                              get_output_shape(baseNet, input_shapes = inputShape))
-
-        nonlinearityLayerInputShape = get_output_shape(baseNet, input_shapes = inputShape)
-        baseNet = NonlinearityLayer(baseNet, softmax)
-        summary += '    {:<15} {:<50} {:<29} {:<29}\n'.format('Nonlinearity', 
-                                                              nonlinearityLayerInputShape, 
-                                                              '',
-                                                              get_output_shape(baseNet, input_shapes = inputShape))
-        
-        if not forSummary:
-            message = 'Finish Built the last classfication layers'
-            self.logger.info(logMessage('-', message))
-
-            message = 'The Receptivr Field of BaseNet equal {}'.format(self.receptiveField)
-            self.logger.info(logMessage('*', message))
-
-            message = 'Finish Building the Architecture of BaseNet'
-            self.logger.info(logMessage('+', message))
-
-        summary += '.' * 130 + '\n'
-        self._summary = summary
-
-        return baseNet
-
+        return dilated3DNet
 
     def complieTrainFunction(self):
         message = 'Compiling the Training Function'
@@ -367,7 +351,7 @@ class BaseNet():
                                     inputShape[2])
         if len(inputShape) == 5:
             inputShapeForSummary = inputShape
-        self.buildBaseNet(inputShapeForSummary, forSummary = True)
+        self.buildDilated3DNet(inputShapeForSummary)
 
         return self._summary
 

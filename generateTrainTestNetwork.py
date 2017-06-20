@@ -15,6 +15,7 @@ from utils.general import logMessage, logTable
 from utils.metrics import voxleWiseMetrics
 from models.sectorNet import SectorNet
 from models.baseNet import BaseNet
+from models.dilated3DNet import Dilated3DNet
 
 
 
@@ -32,7 +33,8 @@ def generateNetwork(configFile):
     # ====================================================================================
     # The networksDict should conresponding to the import statement. 
     networksDict = {'sectorNet': SectorNet,
-                    'baseNet': BaseNet}
+                    'baseNet': BaseNet, 
+                    'dilated3DNet' : Dilated3DNet}
 
     networkType = configInfo['networkType']
     networkClass = networksDict[networkType]
@@ -51,6 +53,7 @@ def generateNetwork(configFile):
     message = 'Creating {}'.format(configInfo['networkName'])
     logger.info(logMessage('#', message))
     network = networkClass(configFile)
+    assert network.networkType == networkType
     message = 'Created {}'.format(networkType)
     logger.info(logMessage('#', message))
     # =====================================================================================
@@ -220,10 +223,10 @@ def trainNetwork(network, configFile):
     # ***************************************************************************
     valTRowList = []
     valTRowList.append(['-', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-'])
-    valTRowList.append(['EPOCH',               'SUBEPOCH',            'Val Time', 
-                        'Val Complete Dice',   'Val Complete Sens',   'Val Complete Spec', 
-                        'Val Core Dice',       'Val Core Sens',       'Val Core Spec', 
-                        'Val Enhancing Dice',  'Val Enhancing Sens',  'Val Enhancing Spec',])
+    valTRowList.append(['EPOCH',        'SUBEPOCH',    'Val Time', 
+                        'CT Dice',      'CT Sens',     'CT Spec', 
+                        'Core Dice',    'Core Sens',   'Core Spec', 
+                        'Eh Dice',      'Eh Sens',     'Eh Spec',])
     valTRowList.append(['-', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-'])
     # ===========================================================================
 
@@ -452,17 +455,17 @@ def trainNetwork(network, configFile):
             # *****************************************************************************************
             # Recording for subepoch row of validation table
             valTime = '{:.3}'.format(valTime)
-            valSubEpCTDice = '{:.6f}'.format(valSubEpCTDice)
-            valSubEpCTSens = '{:.6f}'.format(valSubEpCTSens)
-            valSubEpCTSpec = '{:.6f}'.format(valSubEpCTSpec)
+            valSubEpCTDice = '{:.4f}'.format(valSubEpCTDice)
+            valSubEpCTSens = '{:.4f}'.format(valSubEpCTSens)
+            valSubEpCTSpec = '{:.4f}'.format(valSubEpCTSpec)
 
-            valSubEpCoreDice = '{:.6f}'.format(valSubEpCoreDice)
-            valSubEpCoreSens = '{:.6f}'.format(valSubEpCoreSens)
-            valSubEpCoreSpec = '{:.6f}'.format(valSubEpCoreSpec)
+            valSubEpCoreDice = '{:.4f}'.format(valSubEpCoreDice)
+            valSubEpCoreSens = '{:.4f}'.format(valSubEpCoreSens)
+            valSubEpCoreSpec = '{:.4f}'.format(valSubEpCoreSpec)
 
-            valSubEpEhDice = '{:.6f}'.format(valSubEpEhDice)
-            valSubEpEhSens = '{:.6f}'.format(valSubEpEhSens)
-            valSubEpEhSpec = '{:.6f}'.format(valSubEpEhSpec)
+            valSubEpEhDice = '{:.4f}'.format(valSubEpEhDice)
+            valSubEpEhSens = '{:.4f}'.format(valSubEpEhSens)
+            valSubEpEhSpec = '{:.4f}'.format(valSubEpEhSpec)
 
             valTRowList.append([indexColumn,      subEpIdx + 1,      valTime, 
                                 valSubEpCTDice,   valSubEpCTSens,    valSubEpCTSpec, 
@@ -517,17 +520,17 @@ def trainNetwork(network, configFile):
                               trainEpLoss,      trainEpACC,      epTrainTime])
         trainTRowList.append(['-', '-', '-', '-', '-', '-'])
         # *********************************************************************************************
-        valEpCTDice = '{:.6f}'.format(valEpCTDice)
-        valEpCTSens = '{:.6f}'.format(valEpCTSens)
-        valEpCTSpec = '{:.6f}'.format(valEpCTSpec)
+        valEpCTDice = '{:.4f}'.format(valEpCTDice)
+        valEpCTSens = '{:.4f}'.format(valEpCTSens)
+        valEpCTSpec = '{:.4f}'.format(valEpCTSpec)
 
-        valEpCoreDice = '{:.6f}'.format(valEpCoreDice)
-        valEpCoreSens = '{:.6f}'.format(valEpCoreSens)
-        valEpCoreSpec = '{:.6f}'.format(valEpCoreSpec)
+        valEpCoreDice = '{:.4f}'.format(valEpCoreDice)
+        valEpCoreSens = '{:.4f}'.format(valEpCoreSens)
+        valEpCoreSpec = '{:.4f}'.format(valEpCoreSpec)
 
-        valEpEnDice = '{:.6f}'.format(valEpEnDice)
-        valEpEnSens = '{:.6f}'.format(valEpEnSens)
-        valEpEnSpec = '{:.6f}'.format(valEpEnSpec)
+        valEpEnDice = '{:.4f}'.format(valEpEnDice)
+        valEpEnSens = '{:.4f}'.format(valEpEnSens)
+        valEpEnSpec = '{:.4f}'.format(valEpEnSpec)
         # ---------------------------------------------------------------------------------------------
         valTRowList.append(['-', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-'])
         valTRowList.append(['',               '',                epValTime, 
@@ -573,15 +576,13 @@ def trainNetwork(network, configFile):
     message = 'The Training Results'
     logger.info(logMessage('=', message))
     logger.info(logTable(trainTRowList))
-    logger.info(logMessage('=', '='))
-    message = 'End Training Loops'
-    logger.info(logMessage('#', message))
+    logger.info(logMessage('=', '*'))
     # *************************************************************************************************
     message = 'The Validation Results'
     logger.info(logMessage('=', message))
     logger.info(logTable(valTRowList))
-    logger.info(logMessage('=', '='))
-    message = 'End Validation Loops'
+    logger.info(logMessage('=', '*'))
+    message = 'End Training Loops'
     logger.info(logMessage('#', message))
     # =================================================================================================
 
@@ -713,6 +714,8 @@ def segmentWholeBrain(network,
                       receptiveField,
                       useTestData,
                       batchSize):
+
+    logger = logging.getLogger(__name__)
     # ---------------------------------------------------------------------------------------------
     # Sample test data
     # For short statement.
@@ -745,6 +748,7 @@ def segmentWholeBrain(network,
     # For the last batch not to be too small.
     batchIdxList[-1] = numOfSamples
     batchNum = len(batchIdxList[:-1])
+    logger.info('Segment the whole need {} batchs'.format(batchNum))
     assert len(batchIdxList) > 1
     # ---------------------------------------------------------------------------------------------
     # Test batch loop

@@ -27,8 +27,12 @@ def voxleWiseMetrics(npArray1, npArray2, labelList):
     p1ArrayNum = np.sum(p1Array)
     t1ArrayNum = np.sum(t1Array)
 
-    p1Andt1Array = (p1Array == t1Array).astype(int)
+    p1Andt1Array = (p1Array * t1Array).astype(int)
     p1Andt1ArrayNum = np.sum(p1Andt1Array)
+    assert p1Andt1ArrayNum <= p1ArrayNum, \
+          'p1Andt1ArrayNum: {}, p1ArrayNum: {}'.format(p1Andt1ArrayNum, p1ArrayNum)
+    assert p1Andt1ArrayNum <= t1ArrayNum, \
+          'p1Andt1ArrayNum: {}, t1ArrayNum: {}'.format(p1Andt1ArrayNum, t1ArrayNum)
 
     p0Array = (pArray == 0).astype(int)
     t0Array = (tArray == 0).astype(int)
@@ -36,14 +40,18 @@ def voxleWiseMetrics(npArray1, npArray2, labelList):
     p0ArrayNum = np.sum(p0Array)
     t0ArrayNum = np.sum(t0Array)
 
-    p0Andt0Array = (p0Array == t0Array).astype(int)
+    p0Andt0Array = (p0Array * t0Array).astype(int)
     p0Andt0ArrayNum = np.sum(p0Andt0Array)
+    assert p0Andt0ArrayNum <= p0ArrayNum, \
+          'p0Andt0ArrayNum: {}, p0ArrayNum: {}'.format(p0Andt0ArrayNum, p0ArrayNum)
+    assert p0Andt0ArrayNum <= t0ArrayNum, \
+          'p0Andt0ArrayNum: {}, t0ArrayNum: {}'.format(p0Andt0ArrayNum, t0ArrayNum)
 
     assert p1ArrayNum + p0ArrayNum == pArray.size
     assert t1ArrayNum + t0ArrayNum == tArray.size
     
 
-    diceScore = p1Andt1ArrayNum / ((p1ArrayNum + t1ArrayNum) * 2.0)
+    diceScore = 2.0 * p1Andt1ArrayNum / (p1ArrayNum + t1ArrayNum)
 
     sensitivity = p1Andt1ArrayNum / float(t1ArrayNum)
 

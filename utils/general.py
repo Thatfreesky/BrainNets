@@ -5,6 +5,7 @@ Some short simple and helper function at here.
 import os
 import logging
 import shutil
+import numpy as np
 
 def makeDir(dir, force = False):
 
@@ -62,13 +63,31 @@ def logTable(tableRowList):
     columnNum = len(tableRowList[1])
 
     verticalLineNum = columnNum - 1
-    columnLen = (maxLen - verticalLineNum) / columnNum
-    remainLen = maxLen - columnLen * columnNum - verticalLineNum
 
-    columnLenList = list((columnLen,) * columnNum)
+    maxLenPerColumnList = [0] * columnNum
 
-    for idx in xrange(remainLen):
-        columnLenList[idx] += 1
+    for row in tableRowList:
+        tempColumnLen = [len('{}'.format(column)) for column in row]
+        maxLenPerColumnList = [max(tempColumnLen[i], maxLenPerColumnList[i]) 
+                               for i in xrange(columnNum)]
+
+    wholeNeedLen = sum(maxLenPerColumnList)
+    remainLen = maxLen - wholeNeedLen - verticalLineNum
+
+    assert remainLen >= 0
+
+    columnLenList = maxLenPerColumnList
+    lenDistriList = [length / float(wholeNeedLen) for length in columnLenList]
+
+    remainLenDistriList = np.random.choice(columnNum,
+                                           size = remainLen,
+                                           replace = True,
+                                           p = lenDistriList)
+
+    assert len(remainLenDistriList) == remainLen
+
+    for i in remainLenDistriList:
+        columnLenList[i] += 1
 
     assert sum(columnLenList) + verticalLineNum == maxLen
 
@@ -77,7 +96,7 @@ def logTable(tableRowList):
 
     for i, row in enumerate(tableRowList):
         if all([col == '-' for col in row]):
-            row = ['-' * columnLen for i in row]
+            row = ['-' * columnLenList[i] for i in xrange(columnNum)]
         for j, column in enumerate(row):
             table += pattern.format(column, length = columnLenList[j])
             if j < columnNum - 1:

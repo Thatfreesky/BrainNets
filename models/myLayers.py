@@ -2,7 +2,7 @@ import theano.tensor as T
 from lasagne import init, nonlinearities
 from lasagne.utils import as_tuple
 from lasagne.layers.base import Layer
-from lasagne.layers.conv import BaseConvLayer, conv_input_length
+from lasagne.layers.conv import BaseConvLayer, conv_input_length, conv_output_length
 
 
 
