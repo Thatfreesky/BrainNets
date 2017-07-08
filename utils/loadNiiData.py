@@ -18,7 +18,7 @@ def loadSinglePatientData(patientDir,
     modalsDict = {'t1ce':0, 't1':1, 't2':2, 'flair':3}
 
     imageArrayList = []
-    labelArray = []
+    patientLabelArray = []
     ROIArray = []
 
     modalsPathList = []
@@ -56,20 +56,20 @@ def loadSinglePatientData(patientDir,
 
         imageArrayList.append(readArray(filePath))
 
-    imageArray = np.asarray(imageArrayList, dtype = theano.config.floatX)
+    patientImageArray = np.asarray(imageArrayList, dtype = theano.config.floatX)
 
     assert len(imageArrayList) == len(modals), '{}, {}'.format(len(imageArrayList), modals)
 
     if label:
         assert labelPath != ''
-        labelArray = readArray(labelPath)
+        patientLabelArray = readArray(labelPath)
 
     if ROI:
         assert ROIPath != ''
         ROIArray = readArray(ROIPath)
 
 
-    return imageArray, labelArray, ROIArray
+    return patientImageArray, patientLabelArray, ROIArray
 
 
 
