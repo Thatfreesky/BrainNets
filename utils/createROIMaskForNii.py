@@ -123,7 +123,7 @@ def normAndCreateROIForOneFile(modalFileNameWithPath, ROIPatientDir, haveCreated
             | |        | |
             | |        | |
             |  \      /  |
-            |   \____/   |      |
+            |   \____/   |      
             |------------|
 
     '''

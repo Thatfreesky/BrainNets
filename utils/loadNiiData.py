@@ -5,13 +5,17 @@ import logging
 import os
 
 
-def loadSinglePatientData(patientDir, normType = 'normImage', modals, label = True, ROI = True):
+def loadSinglePatientData(patientDir, 
+                          normType = 'normImage', 
+                          modals = ['t1ce', 't1', 't2', 'flair'], 
+                          label = True, 
+                          ROI = True):
 
     logger = logging.getLogger(__name__)
 
     assert os.path.isdir(patientDir)
 
-    modalsDict = {'tice':0, 't1':1, 't2':2, 'flair':3}
+    modalsDict = {'t1ce':0, 't1':1, 't2':2, 'flair':3}
 
     imageArrayList = []
     labelArray = []
@@ -24,13 +28,13 @@ def loadSinglePatientData(patientDir, normType = 'normImage', modals, label = Tr
     for fileName in os.listdir(patientDir):
 
         if fileName.startswith(normType):
-            modalsPathList.append(os.join(patientDir, fileName))
+            modalsPathList.append(os.path.join(patientDir, fileName))
         
         if 'seg' in fileName:
-            labelPath = os.join(patientDir, fileName)
+            labelPath = os.path.join(patientDir, fileName)
 
         if 'ROI' in fileName:
-            ROIPath = os.join(patientDir, fileName)
+            ROIPath = os.path.join(patientDir, fileName)
 
     finalList = [''] * 4
 
@@ -52,9 +56,9 @@ def loadSinglePatientData(patientDir, normType = 'normImage', modals, label = Tr
 
         imageArrayList.append(readArray(filePath))
 
-    imageArray = np.asarray(imageArrayList, dtype = theano.floatX)
+    imageArray = np.asarray(imageArrayList, dtype = theano.config.floatX)
 
-    assert len(imageArrayList) == len(modals)
+    assert len(imageArrayList) == len(modals), '{}, {}'.format(len(imageArrayList), modals)
 
     if label:
         assert labelPath != ''
