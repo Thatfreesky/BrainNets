@@ -4,6 +4,8 @@ import theano
 import logging
 import os
 
+from general import numpyArrayCounter
+
 
 def loadSinglePatientData(patientDir, 
                           normType = 'normImage', 
@@ -54,7 +56,7 @@ def loadSinglePatientData(patientDir,
         if filePath == '':
             continue
 
-        imageArrayList.append(readArray(filePath))
+        imageArrayList.append(readArray(filePath).astype(theano.config.floatX))
 
     patientImageArray = np.asarray(imageArrayList, dtype = theano.config.floatX)
 
@@ -62,11 +64,24 @@ def loadSinglePatientData(patientDir,
 
     if label:
         assert labelPath != ''
-        patientLabelArray = readArray(labelPath)
+        patientLabelArray = readArray(labelPath).astype('int16')
+        oldLabelCount = numpyArrayCounter(patientLabelArray)
+
+        temArray = (patientLabelArray == 4).astype(int)
+        temArray *= -1
+        patientLabelArray += temArray
+
+        newLabelCount = numpyArrayCounter(patientLabelArray)
+
+        assert oldLabelCount[:-1] == newLabelCount[:-1]
+        assert oldLabelCount[-1][0] == 4
+        assert oldLabelCount[-1][1] == newLabelCount[-1][1]
+
+
 
     if ROI:
         assert ROIPath != ''
-        ROIArray = readArray(ROIPath)
+        ROIArray = readArray(ROIPath).astype('int16')
 
 
     return patientImageArray, patientLabelArray, ROIArray

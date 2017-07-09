@@ -131,7 +131,7 @@ def normAndCreateROIForOneFile(modalFileNameWithPath, ROIPatientDir, haveCreated
     logger = logging.getLogger(__name__)
 
     image = nib.load(modalFileNameWithPath)
-    imageArray = image.get_data()
+    imageArray = image.get_data().astype(theano.config.floatX)
 
     # It's easy to create the ROI mask. Just choose the nonzero region as ROI.
 
@@ -140,6 +140,7 @@ def normAndCreateROIForOneFile(modalFileNameWithPath, ROIPatientDir, haveCreated
         ROIBoolArray = imageArray > 0
         ROIArray = ROIBoolArray.astype('int16')
         ROIImage = nib.Nifti1Image(ROIArray, image.affine)
+        ROIImage.set_data_dtype('int16')
 
         ROIPatientDirSegList = ROIPatientDir.split('/')
         # Get the patient name
@@ -149,6 +150,11 @@ def normAndCreateROIForOneFile(modalFileNameWithPath, ROIPatientDir, haveCreated
         ROIFileName = patientName + '.ROI.nii.gz'
         ROIFileNameWithPath = os.path.join(ROIPatientDir, ROIFileName)
         nib.save(ROIImage, ROIFileNameWithPath)
+
+        # Just for making sure the data type
+        reloadROIImage = nib.load(ROIFileNameWithPath)
+        reloadROIImageArray = reloadROIImage.get_data()
+        assert reloadROIImageArray.dtype == 'int16'
 
 
     modalFileNameWithPathSegList = modalFileNameWithPath.split('/')
@@ -167,9 +173,15 @@ def normAndCreateROIForOneFile(modalFileNameWithPath, ROIPatientDir, haveCreated
     normImageArray = normImageArray.astype(theano.config.floatX)
 
     normImage = nib.Nifti1Image(normImageArray, image.affine)
+    normImage.set_data_dtype(theano.config.floatX)
     normImageName = 'normImage' +  normFileBaseName
     normImageNameWithPath = os.path.join(ROIPatientDir, normImageName)
     nib.save(normImage, normImageNameWithPath)
+
+    # Just for making sure the data type
+    reloadnormImage = nib.load(normImageNameWithPath)
+    reloadnormImageArray = reloadnormImage.get_data()
+    assert reloadnormImageArray.dtype == theano.config.floatX
 
     # logger.debug('Saved the normImage, {}'.format(normImageNameWithPath))
 
@@ -189,9 +201,15 @@ def normAndCreateROIForOneFile(modalFileNameWithPath, ROIPatientDir, haveCreated
     normBrainArray = normBrainArray.astype(theano.config.floatX)
 
     normBrain = nib.Nifti1Image(normBrainArray, image.affine)
+    normBrain.set_data_dtype(theano.config.floatX)
     normBrainName = 'normBrain' +  normFileBaseName
     normBrainNameWithPath = os.path.join(ROIPatientDir, normBrainName)
     nib.save(normBrain, normBrainNameWithPath)
+
+    # Just for making sure the data type
+    reloadnormBrain = nib.load(normBrainNameWithPath)
+    reloadnormBrainArray = reloadnormBrain.get_data()
+    assert reloadnormBrainArray.dtype == theano.config.floatX
 
 
     # logger.debug('Saved the normBrain, {}'.format(normBrainNameWithPath))
