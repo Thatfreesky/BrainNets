@@ -16,7 +16,7 @@ def getSamplesForSubEpoch(numOfSamplesPerSubEpochTrain,
                           patientsDirList,
                           useROI = True,
                           modals = ['t1ce', 't1', 't2', 'flair'],
-                          normType = 0,
+                          normType = 'normImage',
                           trainSampleSize = [25, 25, 25],
                           receptiveField = 17,
                           weightMapType = 0,
@@ -591,7 +591,7 @@ def getWholeImageCoord(imageShape,
                 assert zMax - zMin == testSampleSize[0]
                 assert zMin >= 0 and zMax <= imageShape[0]
 
-                wholeImageCoordList.append([[zMin, zMax], [yMin, yMax], [xMin, xMax]])
+                wholeImageCoordList.append([[zMin, zMax], [xMin, xMax], [yMin, yMax]])
 
     return wholeImageCoordList
 

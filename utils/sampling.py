@@ -580,7 +580,7 @@ def getWholeImageCoord(imageShape,
                 assert zMax - zMin == testSampleSize[0]
                 assert zMin >= 0 and zMax <= imageShape[0]
 
-                wholeImageCoordList.append([[zMin, zMax], [yMin, yMax], [xMin, xMax]])
+                wholeImageCoordList.append([[zMin, zMax], [xMin, xMax], [yMin, yMax]])
 
     return wholeImageCoordList
 
