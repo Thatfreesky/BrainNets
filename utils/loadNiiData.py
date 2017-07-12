@@ -66,6 +66,7 @@ def loadSinglePatientData(patientDir,
         assert labelPath != ''
         patientLabelArray = readArray(labelPath).astype('int16')
         oldLabelCount = numpyArrayCounter(patientLabelArray)
+        if len(oldLabelCount) != 4: logger.debug(oldLabelCount)
 
         temArray = (patientLabelArray == 4).astype(int)
         temArray *= -1
@@ -73,9 +74,9 @@ def loadSinglePatientData(patientDir,
 
         newLabelCount = numpyArrayCounter(patientLabelArray)
 
-        assert oldLabelCount[:-1] == newLabelCount[:-1]
-        assert oldLabelCount[-1][0] == 4
-        assert oldLabelCount[-1][1] == newLabelCount[-1][1]
+        assert np.all(oldLabelCount[:-1] == newLabelCount[:-1])
+        if oldLabelCount[-1][0] == 4: assert newLabelCount[-1][0] == 3
+        assert oldLabelCount[-1][1] == newLabelCount[-1][1], (oldLabelCount, newLabelCount)
 
 
 

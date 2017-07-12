@@ -28,9 +28,9 @@ def getSamplesForSubEpoch(numOfSamplesPerSubEpochTrain,
 
     # For more detail about weightMapType, place read the training cnofig file.
     if weightMapType == 0 or weightMapType == 1:
-        foreBackRatio = 0.5
+        foreBackRatio = 0.3
     elif weightMapType == 2:
-        foreBackRatio = 0.2
+        foreBackRatio = 0.75
     else:
         logger.error('The weightMapType should be one of (0, 1, 2), but {} given.'.format(weightMapType))
         raise ValueError

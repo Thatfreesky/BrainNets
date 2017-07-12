@@ -391,7 +391,7 @@ def trainNetwork(network, configFile):
                 del segmentResult, segmentResultMask, gTArray
                 gc.collect()
 
-            valSubEpPatsNum = len(patientDir)
+            valSubEpPatsNum = len(patsDirForValList)
             valTime = time.time() - valTime
             epValTime += valTime
             # =========================================================================================
@@ -680,6 +680,8 @@ def testNetwork(network, configFile):
     for patient in os.listdir(testImageFolder):
 
         patientDir = os.path.join(testImageFolder, patient)
+        segmentResultDir = os.path.join(outputDir, patient)
+        os.mkdir(segmentResultDir)
         # ---------------------------------------------------------------------------------------------
         # Sample test data
         # For short statement.
@@ -696,8 +698,8 @@ def testNetwork(network, configFile):
         assert gTArray == []
         # ---------------------------------------------------------------------------------------------
         # Save segment results for each patient
-        np.save(segmentResultNameWithPath + 'result', segmentResult)
-        np.save(segmentResultNameWithPath + 'resultMask', segmentResultMask)
+        np.save(os.path.join(segmentResultDir, 'result.npy'), segmentResult)
+        np.save(os.path.join(segmentResultDir, 'resultMask.npy'), segmentResultMask)
         message = 'Saved results of {}'.format(patient)
         logger.info(logMessage('-', message))
     # =================================================================================================
@@ -732,13 +734,13 @@ def segmentWholeBrain(network,
     wholeLabelCoordList = sampleWholeImageResult[2]
     imageShape = sampleWholeImageResult[3]
     gTArray = sampleWholeImageResult[4]
-    assert gTArray == [] if label else gTArray != []
+    assert gTArray != [] if label else gTArray == [], (label, gTArray)
     # ---------------------------------------------------------------------------------------------
     # Prepare ndarray to record segment results for each patient
     segmentResult = np.zeros(imageShape, dtype = 'int32')
     segmentResultMask = np.zeros(imageShape, dtype = 'int16')
     patient = patientDir.split('/')[-1]
-    assert patient.startswith('brats')
+    assert patient.startswith('Brats'), patient
     # ---------------------------------------------------------------------------------------------
     # Prepare for test batch loop
     numOfSamples = len(wholeLabelCoordList)
