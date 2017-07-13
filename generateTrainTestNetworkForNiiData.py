@@ -140,10 +140,9 @@ def trainNetwork(network, configFile):
     trainSampleSize = configInfo['trainSampleSize']
     valSampleSize = configInfo['valSampleSize']
     numOfTrainSamplesPerSubEpoch = configInfo['numOfTrainSamplesPerSubEpoch']
-    numOfValSamplesPerSubEpoch = int(float(numOfTrainSamplesPerSubEpoch) / trainValRatio)
     weightsFolder = configInfo['weightsFolder']
+    outputFolder = configInfo['outputFolder']
     assert batchSize < numOfTrainSamplesPerSubEpoch
-    assert batchSize < numOfValSamplesPerSubEpoch
     # ---------------------------------------------------------------------------
     # Logger training and validation setting infomation
     message = 'Training and Validation setting Summary'
@@ -161,9 +160,8 @@ def trainNetwork(network, configFile):
     tableRowList.append(['Validation Samples Size', valSampleSize])
     tableRowList.append(['Number of Training Samples for Subepoch', 
                          numOfTrainSamplesPerSubEpoch])
-    tableRowList.append(['Number of Validation Samples for Subepoch', 
-                         numOfValSamplesPerSubEpoch])
     tableRowList.append(['Folder to Store Weights During Training', weightsFolder])
+    tableRowList.append(['Output Folder', outputFolder])
     tableRowList.append(['-', '-'])
 
     logger.info(logTable(tableRowList))
@@ -182,10 +180,17 @@ def trainNetwork(network, configFile):
     # Make sure there are no same elements in the patientsDirList
     assert len(patientsDirList) == len(set(patientsDirList))
     random.shuffle(patientsDirList)
-    patientsDirList = patientsDirList[:numOfPatients]
+    # numOfPatients == -1 stands for using all data
+    if numOfPatients != -1: 
+        patientsDirList = patientsDirList[:numOfPatients]
     # ---------------------------------------------------------------------------
     # Divide patients dir in two part according to trainValRatio
-    patsDirForValList = patientsDirList[::trainValRatio + 1]
+    if trainValRatio < 0:
+        # For directly ensure the number of patients for val
+        patsDirForValList = patientsDirList[trainValRatio:]
+    else:
+        patsDirForValList = patientsDirList[::trainValRatio + 1]
+
     patsDirForTrainList = [patsDir for patsDir in patientsDirList 
                            if patsDir not in patsDirForValList]
     assert len(patsDirForValList) + len(patsDirForTrainList) == len(patientsDirList)
@@ -235,6 +240,10 @@ def trainNetwork(network, configFile):
     storeTime = time.strftime('%y-%m-%d_%H:%M:%S')
     weightsDir = os.path.join(weightsFolder, str(storeTime))
     os.mkdir(weightsDir)
+
+    outputDir = os.path.join(outputFolder, 'Val' + str(storeTime))
+    os.mkdir(outputDir)
+
     # ===========================================================================
 
     # Train and Val
@@ -243,6 +252,9 @@ def trainNetwork(network, configFile):
 
         message = 'EPOCH: {}/{}'.format(epIdx + 1, numOfEpochs)
         logger.info(logMessage('+', message))
+
+        epOutputDir = os.path.join(outputDir, 'Ep' + str(epIdx + 1))
+        os.mkdir(epOutputDir)
 
         # Initial some epoch recordor
         # ==============================================================================================
@@ -273,6 +285,9 @@ def trainNetwork(network, configFile):
 
             message = 'SUBEPOCH: {}/{}'.format(subEpIdx + 1, numOfSubEpochs)
             logger.info(logMessage('-', message))
+
+            subEpOutputDir = os.path.join(epOutputDir, 'SubEp' + str(subEpIdx + 1))
+            os.mkdir(subEpOutputDir)
 
             # Training
             # ==========================================================================================
@@ -355,7 +370,13 @@ def trainNetwork(network, configFile):
             valTime = time.time()
             message = 'Validation'
             logger.info(logMessage(':', message))
+
             for patIdx, patientDir in enumerate(patsDirForValList):
+
+                patientName = patientDir.split('/')[-1]
+                segmentResultDir = os.path.join(subEpOutputDir, patientName)
+                os.mkdir(segmentResultDir)
+
                 logger.info('Val {}/{} patient'.format(patIdx + 1, len(patsDirForValList)))
                 segmentResult, segmentResultMask, gTArray = segmentWholeBrain(network,
                                                                               patientDir,
@@ -367,15 +388,20 @@ def trainNetwork(network, configFile):
                                                                               True,
                                                                               batchSize)
                 assert gTArray != []
+
+                np.save(os.path.join(segmentResultDir, 'segmentResult.npy'), segmentResult)
+                np.save(os.path.join(segmentResultDir, 'gTArray.npy'), gTArray)
+                message = 'Saved results of {}'.format(patientName)
+
                 cTDice, cTSens, cTSpeci = voxleWiseMetrics(segmentResult, 
                                                            gTArray, 
                                                            [1, 2, 3])
                 coreDice, cTSens, cTSpec = voxleWiseMetrics(segmentResult, 
                                                             gTArray, 
-                                                            [2])
+                                                            [1, 2])
                 ehDice, ehSens, ehSpec = voxleWiseMetrics(segmentResult, 
                                                           gTArray, 
-                                                          [3])
+                                                          [2, 3])
                 valSubEpCTDice += cTDice
                 valSubEpCTSens += cTSens
                 valSubEpCTSpec += cTSpeci
@@ -387,6 +413,12 @@ def trainNetwork(network, configFile):
                 valSubEpEhDice += ehDice
                 valSubEpEhSens += ehSens
                 valSubEpEhSpec += ehSpec
+
+                valPMessage = 'Patient: {}'.format(patientName)
+                valPMessage += ' Core Dice: {}, '.format(coreDice)
+                valPMessage += ' Core Sens: {}'.format(cTSens)
+                valPMessage += ' Core Spec: {}'.format(cTSpec)
+                logger.info(logMessage('-', valPMessage))
 
                 del segmentResult, segmentResultMask, gTArray
                 gc.collect()
@@ -614,7 +646,7 @@ def testNetwork(network, configFile):
     # Logger network summary
     message = 'Network Summary'
     logger.info(logMessage('*', message))
-    logger.info(networkSummary)
+    logger.info(logTable(networkSummary))
 
     tableRowList = []
     tableRowList.append(['-', '-'])
@@ -671,7 +703,7 @@ def testNetwork(network, configFile):
     # Prepare output folder
     # ==========================================================
     storeTime = time.strftime('%y-%m-%d_%H:%M:%S')
-    outputDir = os.path.join(outputFolder, str(storeTime))
+    outputDir = os.path.join(outputFolder, 'Test' + str(storeTime))
     os.mkdir(outputDir)
     # =================================================================================================
 
@@ -805,7 +837,7 @@ def segmentWholeBrain(network,
 
         if label: 
             testBatchACCList.append(testBatchACC / (endIdx - startIdx))
-            logger.info('Test Batch {} | Test ACC {}'.format(batchIdx, testBatchACCList[-1]))
+            logger.debug('Test Batch {} | Test ACC {}'.format(batchIdx, testBatchACCList[-1]))
 
     assert np.any(segmentResult)
     # ---------------------------------------------------------------------------------------------
