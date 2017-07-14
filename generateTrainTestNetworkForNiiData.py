@@ -8,6 +8,7 @@ import theano
 import time
 import gc
 import datetime
+import multiprocessing as mp
 
 from utils.sampleNii import getSamplesForSubEpoch, sampleWholeBrain
 from utils.loadNiiData import loadSinglePatientData
@@ -295,6 +296,7 @@ def trainNetwork(network, configFile):
             trainSampleTime = time.time()
             message = 'Sampling Training Data'
             logger.info(logMessage('-', message))
+            # ------------------------------------------------------------------------------------------
             trainSampleAndLabelList = getSamplesForSubEpoch(numOfTrainSamplesPerSubEpoch,
                                                             patDirPerSubEpochDict[subEpIdx],
                                                             useROI,
@@ -304,7 +306,7 @@ def trainNetwork(network, configFile):
                                                             receptiveField,
                                                             weightMapType,
                                                             usePoolToSample)
-
+            # ------------------------------------------------------------------------------------------
             trainSamplesList, trainLabelsList = trainSampleAndLabelList
             trainSampleTime = time.time() - trainSampleTime
             epTrainSampleTime += trainSampleTime
@@ -315,6 +317,7 @@ def trainNetwork(network, configFile):
 
             # For the last batch not to be too small.
             trainBatchIdxList[-1] = numOfTrainSamplesPerSubEpoch
+            trainBatchIdxList = trainBatchIdxList[::-1]
             assert len(trainBatchIdxList) > 1
             trainBatchNum = len(trainBatchIdxList[:-1])
             # -----------------------------------------------------------------------------------------
@@ -327,9 +330,16 @@ def trainNetwork(network, configFile):
             logger.info(logMessage(':', message))
             # ........................................................................................
             for trainBatchIdx in xrange(trainBatchNum):
+
+                # For showing progress
+                if trainBatchIdx % 100 == 0:
+                    logger.info('Ep {} SubEp {} Batch {}/{}'.format(epIdx + 1, 
+                                                                    subEpIdx + 1, 
+                                                                    trainBatchIdx + 1, 
+                                                                    trainBatchNum))
                 # Just for clear.
-                trainStartIdx = trainBatchIdxList[trainBatchIdx]
-                trainEndIdx = trainBatchIdxList[trainBatchIdx + 1]
+                trainEndIdx = trainBatchIdxList[trainBatchIdx]
+                trainStartIdx = trainBatchIdxList[trainBatchIdx + 1]
 
                 trainSamplesBatch = trainSamplesList[trainStartIdx:trainEndIdx]
                 trainSamplesBatch = np.asarray(trainSamplesBatch, dtype = theano.config.floatX)
@@ -342,13 +352,17 @@ def trainNetwork(network, configFile):
                 trainSubEpLoss += trainBatchLoss
                 trainSubEpACC += trainBatchAcc
                 trainSubEpBatchNum += 1
+
+                del trainSamplesBatch, trainLabelsBatch
+                del trainSamplesList[trainStartIdx:trainEndIdx]
+                del trainLabelsList[trainStartIdx:trainEndIdx]
+
             trainTime = time.time() - trainTime
             epTrainTime += trainTime
             # ........................................................................................
             # Release source
             del trainSamplesList[:], trainLabelsList[:]
             del trainSamplesList, trainLabelsList
-            del trainSamplesBatch, trainLabelsBatch
             gc.collect()
             # ========================================================================================
 
@@ -378,6 +392,8 @@ def trainNetwork(network, configFile):
                 os.mkdir(segmentResultDir)
 
                 logger.info('Val {}/{} patient'.format(patIdx + 1, len(patsDirForValList)))
+
+                # ------------------------------------------------------------------------------------------
                 segmentResult, segmentResultMask, gTArray = segmentWholeBrain(network,
                                                                               patientDir,
                                                                               useROI,
@@ -387,6 +403,7 @@ def trainNetwork(network, configFile):
                                                                               receptiveField,
                                                                               True,
                                                                               batchSize)
+                # ------------------------------------------------------------------------------------------
                 assert gTArray != []
 
                 np.save(os.path.join(segmentResultDir, 'segmentResult.npy'), segmentResult)
@@ -781,6 +798,7 @@ def segmentWholeBrain(network,
 
     # For the last batch not to be too small.
     batchIdxList[-1] = numOfSamples
+    batchIdxList = batchIdxList[::-1]
     batchNum = len(batchIdxList[:-1])
     logger.info('Segment the whole need {} batchs'.format(batchNum))
     assert len(batchIdxList) > 1
@@ -790,10 +808,14 @@ def segmentWholeBrain(network,
     # Test batch loop
     for batchIdx in xrange(batchNum):
 
+        # For showing progress
+        if batchIdx % 100 == 0:
+            logger.info('Batch {}/{}'.format(batchIdx + 1, batchNum))
+
         if label: testBatchACC = 0
 
-        startIdx = batchIdxList[batchIdx]
-        endIdx = batchIdxList[batchIdx + 1]
+        endIdx = batchIdxList[batchIdx]
+        startIdx = batchIdxList[batchIdx + 1]
 
         samplesBatch = samplesOfWholeImage[startIdx:endIdx]
         samplesBatch = np.asarray(samplesBatch, dtype = theano.config.floatX)
@@ -813,6 +835,9 @@ def segmentWholeBrain(network,
         testPredictionLabel = np.reshape(testPredictionLabel, 
                                         ((endIdx - startIdx), labelZ, labelX, labelY))
         assert testPredictionLabel.shape == ((endIdx - startIdx), labelZ, labelX, labelY)
+
+        del samplesBatch, samplesOfWholeImage[startIdx:endIdx]
+        del labelsBatch, labelsOfWholeImage[startIdx:endIdx]
         # ----------------------------------------------------------------------------------------
         # Store results of each batch
         for idx, labels in enumerate(testPredictionLabel):
@@ -838,6 +863,10 @@ def segmentWholeBrain(network,
         if label: 
             testBatchACCList.append(testBatchACC / (endIdx - startIdx))
             logger.debug('Test Batch {} | Test ACC {}'.format(batchIdx, testBatchACCList[-1]))
+
+        del testPredictionLabel
+
+    del samplesOfWholeImage,  labelsOfWholeImage, wholeLabelCoordList
 
     assert np.any(segmentResult)
     # ---------------------------------------------------------------------------------------------
