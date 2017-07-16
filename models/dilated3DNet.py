@@ -143,11 +143,11 @@ class Dilated3DNet():
 
             batchNormLayer = BatchNormLayer(dilatedLayer)
             preluLayer = prelu(batchNormLayer)
-            concatLayer = ConcatLayer([preluLayer, dilatedLayer], 1, cropping = ['center', 
-                                                                                  'None', 
-                                                                                  'center', 
-                                                                                  'center', 
-                                                                                  'center'])
+            concatLayer = ConcatLayer([preluLayer, dilated3DNet], 1, cropping = [None, 
+                                                                                 None, 
+                                                                                 'center', 
+                                                                                 'center', 
+                                                                                 'center'])
             # ....................................................................................
             # For summary
             num = ''
@@ -225,6 +225,8 @@ class Dilated3DNet():
         self._summary = summaryRowList
 
         return dilated3DNet
+
+
 
     def complieTrainFunction(self):
         message = 'Compiling the Training Function'
@@ -306,7 +308,7 @@ class Dilated3DNet():
        
         testPredictionLabel = T.argmax(testPrediction, axis = 1)
 
-        testFunc = theano.function([self.inputVar], [testPredictionLabel])
+        testFunc = theano.function([self.inputVar], [testPredictionLabel, testPrediction])
         
         message = 'Compiled the Test Function, spent {:.2f}s'.format(time.time()- startTime)
         self.logger.info(logMessage('+', message))

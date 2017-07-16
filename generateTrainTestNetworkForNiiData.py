@@ -9,6 +9,7 @@ import time
 import gc
 import datetime
 import multiprocessing as mp
+import nibabel as nib
 
 from utils.sampleNii import getSamplesForSubEpoch, sampleWholeBrain
 from utils.loadNiiData import loadSinglePatientData
@@ -317,7 +318,6 @@ def trainNetwork(network, configFile):
 
             # For the last batch not to be too small.
             trainBatchIdxList[-1] = numOfTrainSamplesPerSubEpoch
-            trainBatchIdxList = trainBatchIdxList[::-1]
             assert len(trainBatchIdxList) > 1
             trainBatchNum = len(trainBatchIdxList[:-1])
             # -----------------------------------------------------------------------------------------
@@ -337,9 +337,10 @@ def trainNetwork(network, configFile):
                                                                     subEpIdx + 1, 
                                                                     trainBatchIdx + 1, 
                                                                     trainBatchNum))
+
                 # Just for clear.
-                trainEndIdx = trainBatchIdxList[trainBatchIdx]
-                trainStartIdx = trainBatchIdxList[trainBatchIdx + 1]
+                trainStartIdx = trainBatchIdxList[trainBatchIdx]
+                trainEndIdx = trainBatchIdxList[trainBatchIdx + 1]
 
                 trainSamplesBatch = trainSamplesList[trainStartIdx:trainEndIdx]
                 trainSamplesBatch = np.asarray(trainSamplesBatch, dtype = theano.config.floatX)
@@ -354,8 +355,6 @@ def trainNetwork(network, configFile):
                 trainSubEpBatchNum += 1
 
                 del trainSamplesBatch, trainLabelsBatch
-                del trainSamplesList[trainStartIdx:trainEndIdx]
-                del trainLabelsList[trainStartIdx:trainEndIdx]
 
             trainTime = time.time() - trainTime
             epTrainTime += trainTime
@@ -394,9 +393,9 @@ def trainNetwork(network, configFile):
                 logger.info('Val {}/{} patient'.format(patIdx + 1, len(patsDirForValList)))
 
                 # ------------------------------------------------------------------------------------------
-                segmentResult, segmentResultMask, gTArray = segmentWholeBrain(network,
+                segmentResult, softmaxResult, segmentResultMask, gTArray = segmentWholeBrain(network,
                                                                               patientDir,
-                                                                              useROI,
+                                                                              True,
                                                                               modals,
                                                                               normType,
                                                                               valSampleSize,
@@ -406,19 +405,34 @@ def trainNetwork(network, configFile):
                 # ------------------------------------------------------------------------------------------
                 assert gTArray != []
 
-                np.save(os.path.join(segmentResultDir, 'segmentResult.npy'), segmentResult)
+                temArray = (segmentResult == 3).astype(int)
+                segmentResult += temArray
+
+                assert np.all(segmentResult != 3)
+
+                crfResult = denseCRF(softmaxResult)
+
+                npArrayList = [segmentResult, crfResult]
+
+                niisegment, niiCRF = npToNii(patientDir, npArrayList)
+
+                # Save segment results for each patient
+                nib.save(niisegment, os.path.join(segmentResultDir, 'segmentResult.nii.gz'))
+                nib.save(niiCRF, os.path.join(segmentResultDir, 'crfResult.nii.gz'))
+
+                # np.save(os.path.join(segmentResultDir, 'segmentResult.npy'), segmentResult)
                 np.save(os.path.join(segmentResultDir, 'gTArray.npy'), gTArray)
                 message = 'Saved results of {}'.format(patientName)
 
                 cTDice, cTSens, cTSpeci = voxleWiseMetrics(segmentResult, 
                                                            gTArray, 
-                                                           [1, 2, 3])
+                                                           [1, 2, 4])
                 coreDice, cTSens, cTSpec = voxleWiseMetrics(segmentResult, 
                                                             gTArray, 
                                                             [1, 2])
                 ehDice, ehSens, ehSpec = voxleWiseMetrics(segmentResult, 
                                                           gTArray, 
-                                                          [2, 3])
+                                                          [2, 4])
                 valSubEpCTDice += cTDice
                 valSubEpCTSens += cTSens
                 valSubEpCTSpec += cTSpeci
@@ -734,7 +748,7 @@ def testNetwork(network, configFile):
         # ---------------------------------------------------------------------------------------------
         # Sample test data
         # For short statement.
-        segmentResult, segmentResultMask, gTArray = segmentWholeBrain(network,
+        segmentResult, softmaxResult, segmentResultMask, gTArray = segmentWholeBrain(network,
                                                                       patientDir,
                                                                       useROITest,
                                                                       modals,
@@ -746,9 +760,22 @@ def testNetwork(network, configFile):
 
         assert gTArray == []
         # ---------------------------------------------------------------------------------------------
+        temArray = (segmentResult == 3).astype(int)
+        segmentResult += temArray
+
+        assert np.all(segmentResult != 3)
+
+        crfResult = denseCRF(softmaxResult)
+
+        npArrayList = [segmentResult, crfResult]
+
+        niisegment, niiCRF = npToNii(patientDir, npArrayList)
+
         # Save segment results for each patient
-        np.save(os.path.join(segmentResultDir, 'result.npy'), segmentResult)
-        np.save(os.path.join(segmentResultDir, 'resultMask.npy'), segmentResultMask)
+        nib.save(niisegment, os.path.join(segmentResultDir, 'result.nii.gz'))
+        nib.save(niiCRF, os.path.join(segmentResultDir, 'crfResult.nii.gz'))
+        # np.save(os.path.join(segmentResultDir, 'result.npy'), segmentResult)
+        # np.save(os.path.join(segmentResultDir, 'resultMask.npy'), segmentResultMask)
         message = 'Saved results of {}'.format(patient)
         logger.info(logMessage('-', message))
     # =================================================================================================
@@ -787,6 +814,7 @@ def segmentWholeBrain(network,
     # ---------------------------------------------------------------------------------------------
     # Prepare ndarray to record segment results for each patient
     segmentResult = np.zeros(imageShape, dtype = 'int32')
+    softmaxResult = np.zeros([4] + imageShape, dtype = 'int32')
     segmentResultMask = np.zeros(imageShape, dtype = 'int16')
     patient = patientDir.split('/')[-1]
     assert patient.startswith('Brats'), patient
@@ -798,7 +826,6 @@ def segmentWholeBrain(network,
 
     # For the last batch not to be too small.
     batchIdxList[-1] = numOfSamples
-    batchIdxList = batchIdxList[::-1]
     batchNum = len(batchIdxList[:-1])
     logger.info('Segment the whole need {} batchs'.format(batchNum))
     assert len(batchIdxList) > 1
@@ -814,8 +841,8 @@ def segmentWholeBrain(network,
 
         if label: testBatchACC = 0
 
-        endIdx = batchIdxList[batchIdx]
-        startIdx = batchIdxList[batchIdx + 1]
+        startIdx = batchIdxList[batchIdx]
+        endIdx = batchIdxList[batchIdx + 1]
 
         samplesBatch = samplesOfWholeImage[startIdx:endIdx]
         samplesBatch = np.asarray(samplesBatch, dtype = theano.config.floatX)
@@ -823,8 +850,7 @@ def segmentWholeBrain(network,
         labelsBatch = labelsOfWholeImage[startIdx:endIdx]
         labelsBatch = np.asarray(labelsBatch, dtype = 'int32')
 
-        testPredictionLabel = network.testFunction(samplesBatch)
-        testPredictionLabel = testPredictionLabel[0]
+        testPredictionLabel, testPrediction = network.testFunction(samplesBatch)
 
         assert isinstance(testPredictionLabel, np.ndarray)
         labelZ = sampleSize[0] - receptiveField + 1
@@ -834,14 +860,15 @@ def segmentWholeBrain(network,
         assert testPredictionLabel.shape[0] == (endIdx - startIdx) * labelZ * labelY * labelX
         testPredictionLabel = np.reshape(testPredictionLabel, 
                                         ((endIdx - startIdx), labelZ, labelX, labelY))
+        # For simplify the change, just set the class = 4
+        testPrediction = np.reshape(testPrediction, ((endIdx - startIdx), labelZ, labelX, labelY, 4))
+        testPrediction = np.transpose(testPrediction, (0, 4, 1, 2, 3))
         assert testPredictionLabel.shape == ((endIdx - startIdx), labelZ, labelX, labelY)
-
-        del samplesBatch, samplesOfWholeImage[startIdx:endIdx]
-        del labelsBatch, labelsOfWholeImage[startIdx:endIdx]
+        assert testPrediction.shape == ((endIdx - startIdx), 4, labelZ, labelX, labelY)
         # ----------------------------------------------------------------------------------------
         # Store results of each batch
         for idx, labels in enumerate(testPredictionLabel):
-
+            softLabels = testPrediction[idx]
             assert batchIdx * batchSize == batchIdxList[batchIdx]
 
             labelCoordIdx = batchIdx * batchSize + idx
@@ -854,6 +881,7 @@ def segmentWholeBrain(network,
             yR = labelCoord[2][1]
             assert len(set([zR - zL, xR - xL, yR - yL])) == 1
             segmentResult[zL:zR, xL:xR, yL:yR] = labels
+            softmaxResult[:, zL:zR, xL:xR, yL:yR] = softLabels
             segmentResultMask[zL:zR, xL:xR, yL:yR] += np.ones(labels.shape, dtype = 'int16')
 
             if label:
@@ -864,27 +892,54 @@ def segmentWholeBrain(network,
             testBatchACCList.append(testBatchACC / (endIdx - startIdx))
             logger.debug('Test Batch {} | Test ACC {}'.format(batchIdx, testBatchACCList[-1]))
 
-        del testPredictionLabel
-
-    del samplesOfWholeImage,  labelsOfWholeImage, wholeLabelCoordList
-
     assert np.any(segmentResult)
+    assert np.any(softmaxResult)
     # ---------------------------------------------------------------------------------------------
 
-    return segmentResult, segmentResultMask, gTArray
+    return segmentResult, softmaxResult, segmentResultMask, gTArray
 
 
 
 
+def npToNii(patientDir, npList):
+
+    niiList = []
+
+    modalFile = os.listdir(patientDir)[0]
+    modalFile = os.path.join(patientDir, modalFile)
+
+    image = nib.load(modalFile)
+
+    for npArray in npList:
+        niimage = nib.Nifti1Image(npArray, image.affine)
+        niimage.set_data_dtype('int16')
+
+        niiList.append(niimage)
+
+    return niiList
 
 
 
+import pydensecrf.densecrf as dcrf
+from pydensecrf.utils import create_pairwise_gaussian, create_pairwise_bilateral, unary_from_softmax
 
 
 
+def denseCRF(softmaxResult):
 
+    nClass, shape = softmaxResult.shape[0], softmaxResult.shape[1:]
+    crfResult = np.empty(shape)
 
+    d = dcrf.DenseCRF(np.prod(shape), nClass)
+    U = unary_from_softmax(softmaxResult)
 
+    d.setUnaryEnergy(U)
+    feats = create_pairwise_gaussian(sdims = (1.0, 1.0, 1.0), shape = shape)
+    d.addPairwiseEnergy(feats, compat=3, kernel=dcrf.FULL_KERNEL, normalization=dcrf.NORMALIZE_SYMMETRIC)
+    Q = d.inference(5) 
+    crfResult = np.argmax(Q, axis=0).reshape(shape)
+
+    return crfResult
 
 
 
