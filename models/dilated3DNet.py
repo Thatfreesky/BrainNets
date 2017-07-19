@@ -124,6 +124,7 @@ class Dilated3DNet():
         summaryRowList.append([num, layerName, inputS1, inputS2, WShape, outputS])
         # ........................................................................................
         layerBlockNum = len(self.kernelNumList) - 1
+        concatLayerList = []
 
         for idx in xrange(layerBlockNum):
 
@@ -147,13 +148,10 @@ class Dilated3DNet():
             batchNormLayer = BatchNormLayer(dilatedLayer)
             preluLayer = prelu(batchNormLayer)
             if self.concatLayerList[idx] == 1:
-                concatLayer = ConcatLayer([preluLayer, dilated3DNet], 1, cropping = [None, 
-                                                                                     None, 
-                                                                                     'center', 
-                                                                                     'center', 
-                                                                                     'center'])
-            else:
-                concatLayer = preluLayer
+                concatLayerList.append(dilated3DNet)
+                
+            
+            concatLayer = preluLayer
             # ....................................................................................
             # For summary
             num = ''
@@ -166,6 +164,14 @@ class Dilated3DNet():
             # ....................................................................................
 
             dilated3DNet = DropoutLayer(concatLayer, self.dropoutRates)
+
+        concatLayerList.append(dilated3DNet)
+
+        dilated3DNet = ConcatLayer(concatLayerList, 1, cropping = [None, 
+                                                                   None, 
+                                                                   'center', 
+                                                                   'center', 
+                                                                   'center'])
 
 
         dilatedLayer = DilatedConv3DLayer(dilated3DNet, 
