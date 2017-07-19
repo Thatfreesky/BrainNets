@@ -23,7 +23,7 @@ from models.dilated3DNet import Dilated3DNet
 
 
 
-def generateNetwork(configFile):
+def generateNetwork(configFile, onceRunningDir):
 
     logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ def generateNetwork(configFile):
 
     message = 'Creating {}'.format(configInfo['networkName'])
     logger.info(logMessage('#', message))
-    network = networkClass(configFile)
+    network = networkClass(configFile, onceRunningDir)
     assert network.networkType == networkType
     message = 'Created {}'.format(networkType)
     logger.info(logMessage('#', message))
@@ -81,6 +81,10 @@ def trainNetwork(network, configFile):
     # the trainSampleSize
     # Read network information
     trainSampleSize = configInfo['trainSampleSize']
+    kernelNumList = configInfo['kernelNumList']
+    kernelShapeList = configInfo['kernelShapeList']
+    concatLayerList = configInfo['concatLayerList']
+    dilatedFactorList = configInfo['dilatedFactorList']
     networkType = network.networkType
     receptiveField = network.receptiveField
     networkSummary = network.summary(trainSampleSize)
@@ -92,6 +96,10 @@ def trainNetwork(network, configFile):
     logger.info(logMessage('-', '-'))
     tableRowList = []
     tableRowList.append(['-', '-'])
+    tableRowList.append(['Kernel Number List', kernelNumList])
+    tableRowList.append(['Kernel Shape List', kernelShapeList])
+    tableRowList.append(['Concat Layer List', concatLayerList])
+    tableRowList.append(['Dilated Factor List', dilatedFactorList])
     tableRowList.append(['Network Type', networkType])
     tableRowList.append(['Receptive Field', receptiveField])
     tableRowList.append(['-', '-'])
@@ -133,6 +141,11 @@ def trainNetwork(network, configFile):
     # Training and validation setting infomation
     # ===========================================================================
     # Read training and validation setting information
+    learningRate = configInfo['learningRate']
+    learningRateDecay = configInfo['learningRateDecay']
+    weightDecay = configInfo['weightDecay']
+    optimizer = configInfo['optimizer']
+    dropoutRates = configInfo['dropoutRates']
     trainValRatio = configInfo['trainValRatio']
     memoryThreshold = configInfo['memoryThreshold']
     usePoolToSample = configInfo['usePoolToSample']
@@ -142,8 +155,8 @@ def trainNetwork(network, configFile):
     trainSampleSize = configInfo['trainSampleSize']
     valSampleSize = configInfo['valSampleSize']
     numOfTrainSamplesPerSubEpoch = configInfo['numOfTrainSamplesPerSubEpoch']
-    weightsFolder = configInfo['weightsFolder']
-    outputFolder = configInfo['outputFolder']
+    weightsDir = network.weightsDir
+    valResultDir = network.valResultDir
     assert batchSize < numOfTrainSamplesPerSubEpoch
     # ---------------------------------------------------------------------------
     # Logger training and validation setting infomation
@@ -152,6 +165,11 @@ def trainNetwork(network, configFile):
 
     tableRowList = []
     tableRowList.append(['-', '-'])
+    tableRowList.append(['Learning Rate', learningRate])
+    tableRowList.append(['Learning Rate Decay', learningRateDecay])
+    tableRowList.append(['Weight Decay', weightDecay])
+    tableRowList.append(['Optimizer', optimizer])
+    tableRowList.append(['Dropout Rates', dropoutRates])
     tableRowList.append(['Training / validation', trainValRatio])
     tableRowList.append(['Memory Threshold for Subepoch', '{}G'.format(memoryThreshold)])
     tableRowList.append(['Wheather Use MultiProcess to Sample', usePoolToSample])
@@ -162,8 +180,8 @@ def trainNetwork(network, configFile):
     tableRowList.append(['Validation Samples Size', valSampleSize])
     tableRowList.append(['Number of Training Samples for Subepoch', 
                          numOfTrainSamplesPerSubEpoch])
-    tableRowList.append(['Folder to Store Weights During Training', weightsFolder])
-    tableRowList.append(['Output Folder', outputFolder])
+    tableRowList.append(['Folder to Store Weights During Training', weightsDir])
+    tableRowList.append(['Validation Result Folder', valResultDir])
     tableRowList.append(['-', '-'])
 
     logger.info(logTable(tableRowList))
@@ -237,17 +255,6 @@ def trainNetwork(network, configFile):
     valTRowList.append(['-', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-'])
     # ===========================================================================
 
-    # Prepare folder to store network weights during training
-    # ===========================================================================
-    storeTime = time.strftime('%y-%m-%d_%H:%M:%S')
-    weightsDir = os.path.join(weightsFolder, str(storeTime))
-    os.mkdir(weightsDir)
-
-    outputDir = os.path.join(outputFolder, 'Val' + str(storeTime))
-    os.mkdir(outputDir)
-
-    # ===========================================================================
-
     # Train and Val
     # ##################################################################################################
     for epIdx in xrange(numOfEpochs):
@@ -255,7 +262,7 @@ def trainNetwork(network, configFile):
         message = 'EPOCH: {}/{}'.format(epIdx + 1, numOfEpochs)
         logger.info(logMessage('+', message))
 
-        epOutputDir = os.path.join(outputDir, 'Ep' + str(epIdx + 1))
+        epOutputDir = os.path.join(valResultDir, 'Ep' + str(epIdx + 1))
         os.mkdir(epOutputDir)
 
         # Initial some epoch recordor
@@ -719,32 +726,24 @@ def testNetwork(network, configFile):
     logger.info(logMessage('*', message))
     testSampleSize = configInfo['testSampleSize']
     batchSize = configInfo['batchSize']
-    outputFolder = configInfo['outputFolder']
+    testResultDir = network.testResultDir
     # -------------------------------------------------------------------------------------------------
     # Logger test setting summary
     tableRowList = []    
     tableRowList.append(['Test Samples Size', testSampleSize])
     tableRowList.append(['Test Batch Size', batchSize])
-    tableRowList.append(['Folder to Store Test Results', outputFolder])
+    tableRowList.append(['Folder to Store Test Results', testResultDir])
 
     logger.info(logTable(tableRowList))    
     logger.info(logMessage('*', '*'))
     # =================================================================================================
 
-    # Prepare output folder
-    # ==========================================================
-    storeTime = time.strftime('%y-%m-%d_%H:%M:%S')
-    outputDir = os.path.join(outputFolder, 'Test' + str(storeTime))
-    os.mkdir(outputDir)
-    # =================================================================================================
-
+   
     # Test
     # =================================================================================================
     for patient in os.listdir(testImageFolder):
 
         patientDir = os.path.join(testImageFolder, patient)
-        segmentResultDir = os.path.join(outputDir, patient)
-        os.mkdir(segmentResultDir)
         # ---------------------------------------------------------------------------------------------
         # Sample test data
         # For short statement.
@@ -772,10 +771,10 @@ def testNetwork(network, configFile):
         niisegment, niiCRF = npToNii(patientDir, npArrayList)
 
         # Save segment results for each patient
-        nib.save(niisegment, os.path.join(segmentResultDir, 'result.nii.gz'))
-        nib.save(niiCRF, os.path.join(segmentResultDir, 'crfResult.nii.gz'))
-        # np.save(os.path.join(segmentResultDir, 'result.npy'), segmentResult)
-        # np.save(os.path.join(segmentResultDir, 'resultMask.npy'), segmentResultMask)
+        nib.save(niisegment, os.path.join(testResultDir, '{}.nii.gz'.format(patient)))
+        # nib.save(niiCRF, os.path.join(testResultDir, 'crfResult.nii.gz'))
+        # np.save(os.path.join(testResultDir, 'result.npy'), segmentResult)
+        # np.save(os.path.join(testResultDir, 'resultMask.npy'), segmentResultMask)
         message = 'Saved results of {}'.format(patient)
         logger.info(logMessage('-', message))
     # =================================================================================================

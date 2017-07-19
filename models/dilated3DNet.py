@@ -33,7 +33,7 @@ from myLayers import DilatedConv3DLayer
 
 class Dilated3DNet():
 
-    def __init__(self, configFile):
+    def __init__(self, configFile, onceRunningDir):
 
         self.logger = logging.getLogger(__name__)
         self.configInfo = {}
@@ -41,8 +41,11 @@ class Dilated3DNet():
 
         assert self.configInfo['networkType'] == 'dilated3DNet'
         self.networkType = 'dilated3DNet'
+        self.onceRunningDir = onceRunningDir
 
-        self.outputFolder = self.configInfo['outputFolder']
+        self.testResultDir = os.path.join(self.onceRunningDir, 'testResult')
+        self.valResultDir = os.path.join(self.onceRunningDir, 'valResult')
+        self.weightsDir = os.path.join(self.onceRunningDir, 'weight')
 
         # ----------------------------------------------------------------------------------------
         # For build Dilated3DNet.
@@ -55,6 +58,7 @@ class Dilated3DNet():
         self.kernelShapeList = self.configInfo['kernelShapeList']
         self.kernelNumList = self.configInfo['kernelNumList']
         self.dilatedFactorList = self.configInfo['dilatedFactorList']
+        self.concatLayerList = self.configInfo['concatLayerList']
         self.numOfClasses = self.configInfo['numOfClasses']
         self.dropoutRates = self.configInfo['dropoutRates']
 
@@ -77,7 +81,6 @@ class Dilated3DNet():
         # ----------------------------------------------------------------------------------------
         # For comlile train function.
         # We let the learning can be learnt
-        self.weightsFolder = self.configInfo['weightsFolder']
         self.learningRate = theano.shared(np.array(self.configInfo['learningRate'], 
                                                    dtype = theano.config.floatX))
         self.learningRateDecay = np.array(self.configInfo['learningRateDecay'], 
@@ -143,11 +146,14 @@ class Dilated3DNet():
 
             batchNormLayer = BatchNormLayer(dilatedLayer)
             preluLayer = prelu(batchNormLayer)
-            concatLayer = ConcatLayer([preluLayer, dilated3DNet], 1, cropping = [None, 
-                                                                                 None, 
-                                                                                 'center', 
-                                                                                 'center', 
-                                                                                 'center'])
+            if self.concatLayerList[idx] == 1:
+                concatLayer = ConcatLayer([preluLayer, dilated3DNet], 1, cropping = [None, 
+                                                                                     None, 
+                                                                                     'center', 
+                                                                                     'center', 
+                                                                                     'center'])
+            else:
+                concatLayer = preluLayer
             # ....................................................................................
             # For summary
             num = ''
