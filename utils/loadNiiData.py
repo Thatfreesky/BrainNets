@@ -66,7 +66,7 @@ def loadSinglePatientData(patientDir,
 
     patientImageArray = np.asarray(imageArrayList, dtype = theano.config.floatX)
 
-    assert len(imageArrayList) == len(modals), '{}, {}'.format(len(imageArrayList), modals)
+    assert len(imageArrayList) == len(modals) + int(priviousResult != ''), '{}, {}'.format(len(imageArrayList), modals)
 
     if label:
         assert labelPath != ''

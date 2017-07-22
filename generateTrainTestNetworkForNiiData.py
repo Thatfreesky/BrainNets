@@ -270,6 +270,7 @@ def trainNetwork(network, configFile):
             trainSampleTime = time.time()
             message = 'Sampling Training Data'
             logger.info(logMessage('-', message))
+            # print priviousResult, 1
             # ------------------------------------------------------------------------------------------
             trainSampleAndLabelList = getSamplesForSubEpoch(numOfTrainSamplesPerSubEpoch,
                                                             patientsDirList,
@@ -282,7 +283,9 @@ def trainNetwork(network, configFile):
                                                             usePoolToSample,
                                                             priviousResult)
             # ------------------------------------------------------------------------------------------
+            # print priviousResult, 1
             trainSamplesList, trainLabelsList = trainSampleAndLabelList
+            assert trainSamplesList[-1].shape[0] == len(modals) + int(priviousResult != ''), priviousResult
             trainSampleTime = time.time() - trainSampleTime
             epTrainSampleTime += trainSampleTime
             # -----------------------------------------------------------------------------------------
@@ -321,7 +324,7 @@ def trainNetwork(network, configFile):
 
                 trainLabelsBatch = trainLabelsList[trainStartIdx:trainEndIdx]
                 trainLabelsBatch = np.asarray(trainLabelsBatch, dtype = 'int32')
-
+                # print trainSamplesBatch.shape, priviousResult
                 trainBatchLoss, trainBatchAcc = network.trainFunction(trainSamplesBatch, trainLabelsBatch)
                 # Record subepoch training results.
                 trainSubEpLoss += trainBatchLoss
@@ -455,9 +458,9 @@ def trainNetwork(network, configFile):
             valEpCoreSens += cTSens
             valEpCoreSpec += cTSpec
 
-            valEpEhDice += ehDice
-            valEpEhSens += ehSens
-            valEpEhSpec += ehSpec
+            valEpEnDice += ehDice
+            valEpEnSens += ehSens
+            valEpEnSpec += ehSpec
 
             valPMessage = 'Patient: {}'.format(patientName)
             valPMessage += ' Core Dice: {}, '.format(coreDice)
@@ -793,6 +796,7 @@ def segmentWholeBrain(network,
         labelsBatch = labelsOfWholeImage[startIdx:endIdx]
         labelsBatch = np.asarray(labelsBatch, dtype = 'int32')
 
+        print samplesBatch.shape
         testPredictionLabel, testPrediction = network.testFunction(samplesBatch)
 
         assert isinstance(testPredictionLabel, np.ndarray)

@@ -21,11 +21,10 @@ def getSamplesForSubEpoch(numOfSamplesPerSubEpochTrain,
                           receptiveField = 17,
                           weightMapType = 0,
                           parallel = False, 
-                          firstStep = True, 
                           priviousResult = ''):
 
     logger = logging.getLogger(__name__)
-
+    # print priviousResult, 1111111111
     assert len(patientsDirList) > 0
 
     # For more detail about weightMapType, place read the training cnofig file.
@@ -129,6 +128,10 @@ def getSamplesForSubEpoch(numOfSamplesPerSubEpochTrain,
     del labelsOfAPatient[:], labelsOfAPatient
 
     assert len(samplesList) == len(labelsList) == numOfSamplesPerSubEpochTrain
+    assert samplesList[-1].shape[0] == len(modals) + int(priviousResult != ''), \
+           'priviousResult: {}, samplesList[-1].shape: {}, modals: {}'.format(priviousResult, 
+                                                                                 samplesList[-1].shape, 
+                                                                                 modals)
 
     logger.info(logMessage('~', '~'))
     logger.info('Get all {} samples'.format(len(samplesList)))

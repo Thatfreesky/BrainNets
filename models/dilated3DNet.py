@@ -51,10 +51,10 @@ class Dilated3DNet():
         # ----------------------------------------------------------------------------------------
         # For build Dilated3DNet.
         self.preTrainedWeights = self.configInfo['preTrainedWeights']
-
+        self.priviousResult = self.configInfo['priviousResult']
         # For displaying the output shape change process through the network.
         self.modals = self.configInfo['modals']
-        self.inputChannels = len(self.modals)
+        self.inputChannels = len(self.modals) + int(self.priviousResult != '')
         self.trainSampleSize = self.configInfo['trainSampleSize']
         self.kernelShapeList = self.configInfo['kernelShapeList']
         self.kernelNumList = self.configInfo['kernelNumList']
@@ -172,9 +172,13 @@ class Dilated3DNet():
 
             dilated3DNet = DropoutLayer(concatLayer, self.dropoutRates)
 
-            if self.concatLayerList[idx] == 1: concatLayerList.append(dilated3DNet)
+            if self.concatLayerList[idx] == 1 or idx == (layerBlockNum - 1):
+                if idx == layerBlockNum:
+                    assert self.kernelNumList[idx] == self.kernelNumList[-2]
 
+                concatLayerList.append(dilated3DNet)
 
+        assert concatLayerList != []
         dilated3DNet = ConcatLayer(concatLayerList, 1, cropping = [None, 
                                                                    None, 
                                                                    'center', 
