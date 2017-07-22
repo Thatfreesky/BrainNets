@@ -44,6 +44,7 @@ class Dilated3DNet():
         self.onceRunningDir = onceRunningDir
 
         self.testResultDir = os.path.join(self.onceRunningDir, 'testResult')
+        self.testResultDir2 = os.path.join(self.onceRunningDir, 'testResult2')
         self.valResultDir = os.path.join(self.onceRunningDir, 'valResult')
         self.weightsDir = os.path.join(self.onceRunningDir, 'weight')
 
@@ -59,6 +60,7 @@ class Dilated3DNet():
         self.kernelNumList = self.configInfo['kernelNumList']
         self.dilatedFactorList = self.configInfo['dilatedFactorList']
         self.concatLayerList = self.configInfo['concatLayerList']
+        self.concatInputLayerList = self.configInfo['concatInputLayerList']
         self.numOfClasses = self.configInfo['numOfClasses']
         self.dropoutRates = self.configInfo['dropoutRates']
 
@@ -98,7 +100,7 @@ class Dilated3DNet():
         # ----------------------------------------------------------------------------------------
         # For compile val function
         self.valSampleSize = self.configInfo['valSampleSize']
-        self.valFunction = self.compileValFunction()
+        # self.valFunction = self.compileValFunction()
 
         # ----------------------------------------------------------------------------------------
         # For compile test function
@@ -112,7 +114,8 @@ class Dilated3DNet():
         summaryRowList = [['-', '-', '-', '-', '-', '-']]
         summaryRowList.append(['Numbering', 'Layer', 'Input Shape', '', 'W Shape', 'Output Shape'])
         summaryRowList.append(['-', '-', '-', '-', '-', '-'])
-        dilated3DNet = InputLayer(self.inputShape, self.inputVar, name = 'InputLayer')
+        inputLayer = InputLayer(self.inputShape, self.inputVar, name = 'InputLayer')
+        dilated3DNet = inputLayer
         # ........................................................................................
         # For summary
         num = 1
@@ -127,6 +130,13 @@ class Dilated3DNet():
         concatLayerList = []
 
         for idx in xrange(layerBlockNum):
+
+            if idx != 0 and self.concatInputLayerList[idx]:
+                dilated3DNet = ConcatLayer([inputLayer, dilated3DNet], 1, cropping = [None, 
+                                                                                      None, 
+                                                                                      'center', 
+                                                                                      'center', 
+                                                                                      'center'])
 
             dilatedLayer = DilatedConv3DLayer(dilated3DNet, 
                                               self.kernelNumList[idx], 
@@ -147,10 +157,7 @@ class Dilated3DNet():
 
             batchNormLayer = BatchNormLayer(dilatedLayer)
             preluLayer = prelu(batchNormLayer)
-            if self.concatLayerList[idx] == 1:
-                concatLayerList.append(dilated3DNet)
                 
-            
             concatLayer = preluLayer
             # ....................................................................................
             # For summary
@@ -165,7 +172,8 @@ class Dilated3DNet():
 
             dilated3DNet = DropoutLayer(concatLayer, self.dropoutRates)
 
-        concatLayerList.append(dilated3DNet)
+            if self.concatLayerList[idx] == 1: concatLayerList.append(dilated3DNet)
+
 
         dilated3DNet = ConcatLayer(concatLayerList, 1, cropping = [None, 
                                                                    None, 
@@ -332,7 +340,7 @@ class Dilated3DNet():
 
         message = 'Save Weights in {}'.format(fileName)
         self.logger.info(logMessage('+', message))
-        fileNameWithPath = os.path.join(self.weightsFolder, fileName)
+        fileNameWithPath = os.path.join(self.weightsDir, fileName)
         np.savez(fileNameWithPath, 
                  *get_all_param_values(self.outputLayer))
 

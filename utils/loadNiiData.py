@@ -11,7 +11,8 @@ def loadSinglePatientData(patientDir,
                           normType = 'normImage', 
                           modals = ['t1ce', 't1', 't2', 'flair'], 
                           label = True, 
-                          ROI = True):
+                          ROI = True, 
+                          priviousResult = ''):
 
     logger = logging.getLogger(__name__)
 
@@ -56,6 +57,11 @@ def loadSinglePatientData(patientDir,
         if filePath == '':
             continue
 
+        imageArrayList.append(readArray(filePath).astype(theano.config.floatX))
+
+    if priviousResult != '':
+        patientName = patientDir.split('/')[-1]
+        priviousImage = os.path.join(priviousResult, patientName + '.nii.gz')
         imageArrayList.append(readArray(filePath).astype(theano.config.floatX))
 
     patientImageArray = np.asarray(imageArrayList, dtype = theano.config.floatX)

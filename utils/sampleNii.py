@@ -20,7 +20,9 @@ def getSamplesForSubEpoch(numOfSamplesPerSubEpochTrain,
                           trainSampleSize = [25, 25, 25],
                           receptiveField = 17,
                           weightMapType = 0,
-                          parallel = False):
+                          parallel = False, 
+                          firstStep = True, 
+                          priviousResult = ''):
 
     logger = logging.getLogger(__name__)
 
@@ -95,7 +97,8 @@ def getSamplesForSubEpoch(numOfSamplesPerSubEpochTrain,
                                                                       trainSampleSize, 
                                                                       receptiveField, 
                                                                       weightMapType, 
-                                                                      numOfForeBackSamples))
+                                                                      numOfForeBackSamples, 
+                                                                      priviousResult))
             results.append(result)
 
         else:
@@ -106,7 +109,8 @@ def getSamplesForSubEpoch(numOfSamplesPerSubEpochTrain,
                                                                          trainSampleSize, 
                                                                          receptiveField, 
                                                                          weightMapType, 
-                                                                         numOfForeBackSamples)
+                                                                         numOfForeBackSamples, 
+                                                                         priviousResult)
             samplesList += samplesOfAPatient
             labelsList += labelsOfAPatient
 
@@ -159,7 +163,8 @@ def getSamplesFromAPatient(patientDir,
                            trainSampleSize, 
                            receptiveField, 
                            weightMapType, 
-                           numOfForeBackSamples):
+                           numOfForeBackSamples, 
+                           priviousResult = ''):
 
     # Also store the ROI in the patientLabelArray if useROI == True
     # patientImageArray dtype = theano.config.floatX.
@@ -168,12 +173,13 @@ def getSamplesFromAPatient(patientDir,
     loadedData = loadNiiData.loadSinglePatientData(patientDir, 
                                                    normType, 
                                                    modals, 
-                                                   label = True,
-                                                   ROI = useROI)
+                                                   True,
+                                                   useROI, 
+                                                   priviousResult)
 
     patientImageArray, patientLabelArray, patientROIArray = loadedData
 
-    assert patientImageArray.shape == (len(modals), 240, 240, 155)
+    assert patientImageArray.shape == (len(modals) + int(priviousResult != ''), 240, 240, 155)
     assert patientLabelArray.shape == (240, 240, 155)
     if useROI: assert patientROIArray.shape == (240, 240, 155)
     if not useROI: assert patientROIArray == []
@@ -198,7 +204,7 @@ def getSamplesFromAPatient(patientDir,
     ySize = trainSampleSize[2]
 
     assert len(samplesOfAPatient) == sum(numOfForeBackSamples)
-    assert all([sample.shape == (len(modals), zSize, xSize, ySize) 
+    assert all([sample.shape == (len(modals) + int(priviousResult != ''), zSize, xSize, ySize) 
                 for sample in samplesOfAPatient]), '{}'.format([s.shape 
                                                                 for s in samplesOfAPatient])
 
@@ -480,17 +486,19 @@ def sampleWholeBrain(patientDir,
                      testSampleSize, 
                      receptiveField,
                      label = False, 
-                     useROITest = True):
+                     useROITest = True,
+                     priviousResult = ''):
 
     loadedData = loadNiiData.loadSinglePatientData(patientDir, 
                                                    normType, 
                                                    modals, 
                                                    label,
-                                                   ROI = useROITest)
+                                                   useROITest, 
+                                                   priviousResult)
 
     patientImageArray, patientLabelArray, patientROIArray = loadedData
 
-    assert patientImageArray.shape == (len(modals), 240, 240, 155)
+    assert patientImageArray.shape == (len(modals) + int(priviousResult != ''), 240, 240, 155)
     assert isinstance(patientImageArray, np.ndarray)
     
     if label: assert patientLabelArray.shape == (240, 240, 155)
