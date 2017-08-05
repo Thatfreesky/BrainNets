@@ -756,6 +756,7 @@ def segmentWholeBrain(network,
     wholeLabelCoordList = sampleWholeImageResult[2]
     imageShape = sampleWholeImageResult[3]
     gTArray = sampleWholeImageResult[4]
+    ROIArray = sampleWholeImageResult[5]
     assert gTArray != [] if label else gTArray == [], (label, gTArray)
     # ---------------------------------------------------------------------------------------------
     # Prepare ndarray to record segment results for each patient
@@ -796,7 +797,7 @@ def segmentWholeBrain(network,
         labelsBatch = labelsOfWholeImage[startIdx:endIdx]
         labelsBatch = np.asarray(labelsBatch, dtype = 'int32')
 
-        print samplesBatch.shape
+        # print samplesBatch.shape
         testPredictionLabel, testPrediction = network.testFunction(samplesBatch)
 
         assert isinstance(testPredictionLabel, np.ndarray)
@@ -841,6 +842,7 @@ def segmentWholeBrain(network,
 
     assert np.any(segmentResult)
     assert np.any(softmaxResult)
+    segmentResult = segmentResult * ROIArray
     # ---------------------------------------------------------------------------------------------
     temSegArray = (segmentResult == 3).astype(int)
     segmentResult += temSegArray

@@ -538,7 +538,7 @@ def sampleWholeBrain(patientDir,
     if label:
         assert len(samplesOfWholeImage) == len(labelsOfWholeImage) == len(wholeLabelCoordList)
 
-    return samplesOfWholeImage, labelsOfWholeImage, wholeLabelCoordList, imageShape, gTArray
+    return samplesOfWholeImage, labelsOfWholeImage, wholeLabelCoordList, imageShape, gTArray, ROIArray
 
 
 
