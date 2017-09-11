@@ -29,7 +29,7 @@ def getSamplesForSubEpoch(numOfSamplesPerSubEpochTrain,
 
     # For more detail about weightMapType, place read the training cnofig file.
     if weightMapType == 0 or weightMapType == 1:
-        foreBackRatio = 0.5
+        foreBackRatio = 0.05
     elif weightMapType == 2:
         foreBackRatio = 0.75
     else:
