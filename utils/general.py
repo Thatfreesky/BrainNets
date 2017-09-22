@@ -107,3 +107,37 @@ def logTable(tableRowList):
     table = '\n' + table
 
     return table
+
+
+
+def goToTheImageFiles(inputDir, grade = ['HGG', 'LGG']):
+
+    '''
+    This function just for the Brats training dataset files sturcture.
+    '''
+
+    for gradeDirItem in os.listdir(inputDir):
+
+        if not gradeDirItem in grade: continue
+
+        gradeDir = os.path.join(inputDir, gradeDirItem)
+
+        if not os.path.isdir(gradeDir): continue
+
+        assert os.path.isdir(gradeDir)
+        
+        for patientDirItem in os.listdir(gradeDir):
+
+            patientDir = os.path.join(gradeDir, patientDirItem)
+
+            if not os.path.isdir(patientDir): continue
+
+            assert os.path.isdir(patientDir)
+
+            for modalFileName in os.listdir(patientDir):
+
+                if modalFileName.startswith('.'): continue
+
+                assert modalFileName.endswith('nii.gz')
+
+                yield (patientDir, modalFileName)
