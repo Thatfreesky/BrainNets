@@ -81,7 +81,8 @@ def getSamplesForSubEpoch(numOfSamplesPerSubEpochTrain,
     receptiveFieldRadius = receptiveField / 2
 
     if parallel:
-        pool = mp.Pool()
+        cpus = multiprocessing.cpu_count()
+        pool = mp.Pool(processes = cpus)
         results = []
 
     for idx, patientDir in enumerate(patientsDirList):

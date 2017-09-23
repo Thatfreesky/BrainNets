@@ -5,11 +5,14 @@ import logging
 import shutil
 import theano
 import pickle
+from random import shuffle
+import multiprocessing as mp
 from nipype.interfaces.ants import N4BiasFieldCorrection
 from medpy.filter import IntensityRangeStandardization
 
 
 import general as ge
+from general import logMessage, logTable
 
 
 
@@ -17,7 +20,8 @@ def preProcessingWithN4(inputDir,
                         modals = ['t1ce', 't1'],
                         bsplineFittingDistance = 200,
                         shrinkFactor = 2,
-                        iterations = [20,20,20,10]):
+                        iterations = [20,20,20,10],
+                        parallel = False):
 
     '''
     # The example from nipype documents(https://pythonhosted.org/nipype/interfaces/generated/nipype.interfaces.ants.segmentation.html)
@@ -39,6 +43,11 @@ def preProcessingWithN4(inputDir,
 
     '''
 
+    if parallel:
+        cpus = mp.cpu_count()
+        pool = mp.Pool(processes = cpus)
+
+
     for patientDir, modalFileName in ge.goToTheImageFiles(inputDir):
 
         modalFileNameSegList = modalFileName.split('_')
@@ -53,11 +62,22 @@ def preProcessingWithN4(inputDir,
             inputImagePath = os.path.join(patientDir, modalFileName)
             outputImagePath = os.path.join(patientDir, 'N4' + modalFileName)
 
-            N4BiasCorrectAFile(inputImagePath,
-                               bsplineFittingDistance,
-                               shrinkFactor,
-                               iterations,
-                               outputImagePath)
+            if parallel:
+                pool.apply_async(N4BiasCorrectAFile, args = (inputImagePath,
+                                                             bsplineFittingDistance,
+                                                             shrinkFactor,
+                                                             iterations,
+                                                             outputImagePath))
+            else:
+                N4BiasCorrectAFile(inputImagePath,
+                                   bsplineFittingDistance,
+                                   shrinkFactor,
+                                   iterations,
+                                   outputImagePath)
+
+    if parallel:
+        pool.close()
+        pool.join()
 
 
 def N4BiasCorrectAFile(inputImagePath,
@@ -77,7 +97,8 @@ def N4BiasCorrectAFile(inputImagePath,
     n4.run()  
 
 
-def IntensityRangesStand():
+def IntensityRangesStand(trainedModel,
+                         imageDir):
 
     '''
     Reference
@@ -126,6 +147,8 @@ def trainIntensityRangeStandModel(imageDir,
 
     logger = logging.getLogger(__name__)
 
+    casesList = []
+
     for patientDir, modalFileName in ge.goToTheImageFiles(inputDir, grade):
 
         if afterN4 and 'N4' not in modalFileName: continue
@@ -138,7 +161,74 @@ def trainIntensityRangeStandModel(imageDir,
 
         assert modalName in ['flair', 't2', 't1ce', 't1', 'seg']
 
-        if modalName in modals:
+        if modalName == modal:
+            imagePath = os.path.join(patientDir, modalFileName)
+            casesList.append(imagePath)
+
+    assert imagePath != []
+
+    shuffile(casesList)
+
+    if numUsedToTrain == -1: 
+        casesUsedToTrain = casesList[:]
+        logger.info('Use all cases to train')
+    elif numUsedToTrain > len(casesList):
+        casesUsedToTrain = casesList[:]
+        logger.info('There are only {} cases, {} supply, \
+                    so we use all cases to train'.format(len(casesList, numUsedToTrain)))
+    else:
+        casesUsedToTrain = casesList[:numUsedToTrain]
+        logger.info('Use {} cases to train'.foramt(numUsedToTrain))
+
+    imagesArrayList = []
+
+    for imagePath in casesUsedToTrain:
+
+        image = nib.load(modalFileNameWithPath)
+        imageArray = image.get_data().astype(theano.config.floatX)
+
+        imagesArrayList.append(imageArray)
+
+    logger.info('Load all training data')
+
+    irs = IntensityRangeStandardization(cutoff, landmarkm, stdrange)
+    logger.info('The model parameters are:')
+
+    tableRowList = []
+    tableRowList.append(['-', '-'])
+    tableRowList.append(['imageDir', imageDir])
+    tableRowList.append(['grade', grade])
+    tableRowList.append(['modal', modal])
+    tableRowList.append(['afterN4', afterN4])
+    tableRowList.append(['numUsedToTrain', numUsedToTrain])
+    tableRowList.append(['storeLocation', storeLocation])
+    tableRowList.append(['cutoff', cutoff])
+    tableRowList.append(['landmark', landmark])
+    tableRowList.append(['stdrange', stdrange])
+    
+    tableRowList.append(['-', '-'])
+
+    logger.info(logTable(tableRowList))
+
+    logger.info('Begin training intensity range standardization model')
+
+    startTime = time.time()
+    irs.train(imagesArrayList)
+    endTime = time.time() - startTime
+
+    logger.info('Trained the model, which taken {} seconds'.format(endTime))
+
+    modelName = '{}_{}_{}_{}_{}_{}'.format(grade, modal, afterN4, numUsedToTrain, landmark, stdrange)
+    modelNameWithPath = os.path.join(storeLocation, modelName)
+
+    with open(modelNameWithPath, 'wb') as f:
+        pickle.dump([irs, imagesArrayList, tableRowList], f)
+
+
+
+ 
+
+
 
 
 
