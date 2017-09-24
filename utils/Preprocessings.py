@@ -4,6 +4,7 @@ import os
 import logging
 import shutil
 import theano
+import time
 import pickle
 from random import shuffle
 import multiprocessing as mp
@@ -98,7 +99,7 @@ def N4BiasCorrectAFile(inputImagePath,
 
 
 def IntensityRangesStand(trainedModel,
-                         imageDir):
+                         inputDir = ''):
 
     '''
     Reference
@@ -134,13 +135,59 @@ def IntensityRangesStand(trainedModel,
 
     '''
 
+    logger = logging.getLogger(__name__)
 
-def trainIntensityRangeStandModel(imageDir,
-                                  grade,
+    with open(trainedModel, 'r') as f:
+
+        irs, _, tableRowList = oickle.load(f)
+
+
+    if inputDir == '': inputDir = tableRowList['inputDir']
+
+    grade = tableRowList['grade']
+    modal = tableRowList['modal']
+    afterN4 = tableRowList['afterN4']
+
+    for patientDir, modalFileName in ge.goToTheImageFiles(inputDir, grade):
+
+        if afterN4 and 'N4' not in modalFileName: continue
+        if not afterN4 and 'N4' in modalFileName: continue
+
+        modalFileNameSegList = modalFileName.split('_')
+        modalNameWithFileType = modalFileNameSegList[-1]
+
+        modalName = modalNameWithFileType.split('.')[0]
+
+        assert modalName in ['flair', 't2', 't1ce', 't1', 'seg']
+
+        if modalName == modal:
+            imagePath = os.path.join(patientDir, modalFileName)
+
+            image = nib.load(imagePath)
+            imageArray = image.get_data().astype(theano.config.floatX)
+
+            standardArray = iris.transform(imageArray)
+
+            standardImage = nib.Nifti1Image(standardArray, image.affine)
+            standardImage.set_data_dtype(theano.config.floatX)
+
+            standardImageName = '{}_{}'.format(landmark, stdrange) + modalFileName
+            standardImageNameWithPath = os.path.join(patientDir, standardImageName)
+            nib.save(standardImage, standardImageNameWithPath)
+
+
+
+
+
+
+
+
+def trainIntensityRangeStandModel(grade,
                                   modal,
-                                  afterN4,
                                   numUsedToTrain,
+                                  inputDir,
                                   storeLocation,
+                                  afterN4,
                                   cutoff = (1,99),
                                   landmark = 'L4',
                                   stdrange = 'auto'):
@@ -165,9 +212,9 @@ def trainIntensityRangeStandModel(imageDir,
             imagePath = os.path.join(patientDir, modalFileName)
             casesList.append(imagePath)
 
-    assert imagePath != []
+    assert casesList != []
 
-    shuffile(casesList)
+    shuffle(casesList)
 
     if numUsedToTrain == -1: 
         casesUsedToTrain = casesList[:]
@@ -178,30 +225,30 @@ def trainIntensityRangeStandModel(imageDir,
                     so we use all cases to train'.format(len(casesList, numUsedToTrain)))
     else:
         casesUsedToTrain = casesList[:numUsedToTrain]
-        logger.info('Use {} cases to train'.foramt(numUsedToTrain))
+        logger.info('Use {} cases to train'.format(numUsedToTrain))
 
     imagesArrayList = []
 
     for imagePath in casesUsedToTrain:
 
-        image = nib.load(modalFileNameWithPath)
+        image = nib.load(imagePath)
         imageArray = image.get_data().astype(theano.config.floatX)
 
         imagesArrayList.append(imageArray)
 
     logger.info('Load all training data')
 
-    irs = IntensityRangeStandardization(cutoff, landmarkm, stdrange)
+    irs = IntensityRangeStandardization(cutoff, landmark, stdrange)
     logger.info('The model parameters are:')
 
     tableRowList = []
     tableRowList.append(['-', '-'])
-    tableRowList.append(['imageDir', imageDir])
     tableRowList.append(['grade', grade])
     tableRowList.append(['modal', modal])
-    tableRowList.append(['afterN4', afterN4])
     tableRowList.append(['numUsedToTrain', numUsedToTrain])
+    tableRowList.append(['inputDir', inputDir])
     tableRowList.append(['storeLocation', storeLocation])
+    tableRowList.append(['afterN4', afterN4])
     tableRowList.append(['cutoff', cutoff])
     tableRowList.append(['landmark', landmark])
     tableRowList.append(['stdrange', stdrange])
@@ -218,15 +265,30 @@ def trainIntensityRangeStandModel(imageDir,
 
     logger.info('Trained the model, which taken {} seconds'.format(endTime))
 
-    modelName = '{}_{}_{}_{}_{}_{}'.format(grade, modal, afterN4, numUsedToTrain, landmark, stdrange)
+    modelName = '{}_{}_{}_{}_{}_{}.pkl'.format(grade, modal, afterN4, numUsedToTrain, landmark, stdrange)
     modelNameWithPath = os.path.join(storeLocation, modelName)
 
     with open(modelNameWithPath, 'wb') as f:
-        pickle.dump([irs, imagesArrayList, tableRowList], f)
+        pickle.dump([irs, dict(casesUsedToTrain), tableRowList], f)
 
 
 
- 
+def trainIRSMsParallel(privateParaList, commonParaTuple):
+
+    cpus = mp.cpu_count()
+    pool = mp.Pool(processes = cpus)
+
+    for model in privateParaList:
+
+        pool.apply_async(trainIntensityRangeStandModel, args = model + commonParaTuple)
+
+    pool.close()
+    pool.join()
+
+
+
+
+
 
 
 
