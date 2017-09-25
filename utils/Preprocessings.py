@@ -6,6 +6,7 @@ import shutil
 import theano
 import time
 import pickle
+from datetime import datetime
 from random import shuffle
 import multiprocessing as mp
 from nipype.interfaces.ants import N4BiasFieldCorrection
@@ -98,8 +99,8 @@ def N4BiasCorrectAFile(inputImagePath,
     n4.run()  
 
 
-def IntensityRangesStand(trainedModel,
-                         inputDir = ''):
+def transIntensityRangesStand(trainedModel,
+                              inputDir = ''):
 
     '''
     Reference
@@ -139,14 +140,15 @@ def IntensityRangesStand(trainedModel,
 
     with open(trainedModel, 'r') as f:
 
-        irs, _, tableRowList = oickle.load(f)
-
+        irs, _, tableRowList = pickle.load(f)
 
     if inputDir == '': inputDir = tableRowList['inputDir']
 
     grade = tableRowList['grade']
     modal = tableRowList['modal']
     afterN4 = tableRowList['afterN4']
+    landmark = tableRowList['landmark']
+    stdrange = tableRowList['stdrange']
 
     for patientDir, modalFileName in ge.goToTheImageFiles(inputDir, grade):
 
@@ -166,8 +168,15 @@ def IntensityRangesStand(trainedModel,
             image = nib.load(imagePath)
             imageArray = image.get_data().astype(theano.config.floatX)
 
-            standardArray = iris.transform(imageArray)
+            maskArray = imageArray > 0
+            imageArrayAfterWithMask = imageArray[maskArray]
+            transformedArray = irs.transform(imageArrayAfterWithMask)
 
+            standardArray = imageArray
+            standardArray[maskArray] = transformedArray
+
+            assert np.all(standardArray == imageArray)
+            
             standardImage = nib.Nifti1Image(standardArray, image.affine)
             standardImage.set_data_dtype(theano.config.floatX)
 
@@ -177,7 +186,19 @@ def IntensityRangesStand(trainedModel,
 
 
 
+def transIntensityRangesStandParallel(modelsDir):
 
+    cpus = mp.cpu_count()
+    pool = mp.Pool(processes = cpus)
+
+    modelsPathList = [os.path.join(modelsDir, modelName) for modelName in os.listdir(modelsDir)]
+
+    for model in modelsPathList:
+
+        pool.apply_async(transIntensityRangesStand, args = (model, ''))
+
+    pool.close()
+    pool.join()
 
 
 
@@ -189,7 +210,7 @@ def trainIntensityRangeStandModel(grade,
                                   storeLocation,
                                   afterN4,
                                   cutoff = (1,99),
-                                  landmark = 'L4',
+                                  landmark = [25, 50, 75],
                                   stdrange = 'auto'):
 
     logger = logging.getLogger(__name__)
@@ -228,13 +249,18 @@ def trainIntensityRangeStandModel(grade,
         logger.info('Use {} cases to train'.format(numUsedToTrain))
 
     imagesArrayList = []
+    masksArrayList = []
 
     for imagePath in casesUsedToTrain:
 
         image = nib.load(imagePath)
+
         imageArray = image.get_data().astype(theano.config.floatX)
+        maskArray = imageArray > 0
 
         imagesArrayList.append(imageArray)
+        masksArrayList.append(maskArray)
+
 
     logger.info('Load all training data')
 
@@ -259,8 +285,9 @@ def trainIntensityRangeStandModel(grade,
 
     logger.info('Begin training intensity range standardization model')
 
+
     startTime = time.time()
-    irs.train(imagesArrayList)
+    irs.train([imageArr[maskArr] for imageArr, maskArr in zip(imagesArrayList, masksArrayList)])
     endTime = time.time() - startTime
 
     logger.info('Trained the model, which taken {} seconds'.format(endTime))
@@ -269,11 +296,27 @@ def trainIntensityRangeStandModel(grade,
     modelNameWithPath = os.path.join(storeLocation, modelName)
 
     with open(modelNameWithPath, 'wb') as f:
-        pickle.dump([irs, dict(casesUsedToTrain), tableRowList], f)
+        pickle.dump([irs, casesUsedToTrain, dict(tableRowList)], f)
 
 
 
 def trainIRSMsParallel(privateParaList, commonParaTuple):
+
+    storeLocationInTimeSegList = [str(item)for item in commonParaTuple[2:]]
+
+    storeLocation = '_'.join(storeLocationInTimeSegList)
+    storeLocation += '_{}_{}'.format(privateParaList[0][-1], privateParaList[-1][-1])
+    timeString = datetime.now().strftime('%y-%m-%d_%H:%M:%S')
+    storeLocationInTime = storeLocation + '_' + timeString
+
+    fullStoreLocationInTime = os.path.join(commonParaTuple[1], storeLocationInTime)
+
+    os.mkdir(fullStoreLocationInTime)
+
+    commonParaList = list(commonParaTuple)
+    commonParaList[1] = fullStoreLocationInTime
+
+    commonParaTuple = tuple(commonParaList)
 
     cpus = mp.cpu_count()
     pool = mp.Pool(processes = cpus)
